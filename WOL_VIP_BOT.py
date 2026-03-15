@@ -1,8 +1,6 @@
 import re
 import os
-import time
 import logging
-import asyncio
 import aiohttp
 import tempfile
 from datetime import datetime
@@ -296,18 +294,10 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 
-def main():
+if __name__ == "__main__":
+    print("👑 WOL VIP BOT شغّال 24/7 ✅")
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
-    print("👑 WOL VIP BOT شغّال 24/7 ✅")
     app.run_polling(drop_pending_updates=True)
-
-
-while True:
-    try:
-        main()
-    except Exception as e:
-        print(f"⚠️ {e} — إعادة تشغيل...")
-        time.sleep(3)
