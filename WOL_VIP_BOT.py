@@ -105,6 +105,107 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════
+#           🌐 الترجمة التلقائية إلى العربية
+# ═══════════════════════════════════════════════════════════
+def translate_to_arabic(text: str, title: bool = False) -> str:
+    """ترجمة النص إلى العربية باستخدام نظام ذكاء اصطناعي أو قاموس مدمج"""
+    if not text or not text.strip():
+        return text
+    
+    # فحص إذا النص عربي أصلاً
+    arabic_chars = sum(1 for c in text if '\u0600' <= c <= '\u06FF')
+    if arabic_chars > len(text) * 0.3:
+        return text  # النص عربي بالفعل
+    
+    # محاولة الترجمة بـ نظام ذكاء اصطناعي
+    if ANTHROPIC_API_KEY:
+        try:
+            prompt = f"""ترجم هذا النص إلى العربية الفصحى بدقة. أعد الترجمة فقط بدون أي شرح:
+
+{text[:500]}"""
+            response = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 300,
+                    "messages": [{"role": "user", "content": prompt}]
+                },
+                timeout=10
+            )
+            if response.status_code == 200:
+                return response.json()["content"][0]["text"].strip()
+        except Exception as e:
+            logger.error(f"Translation error: {e}")
+    
+    # قاموس ترجمة مدمج للكلمات الشائعة
+    translations = {
+        "attack": "هجوم", "strike": "ضربة", "missile": "صاروخ",
+        "drone": "طائرة مسيّرة", "explosion": "انفجار", "killed": "قتيل",
+        "war": "حرب", "military": "عسكري", "operation": "عملية",
+        "iran": "إيران", "israel": "إسرائيل", "america": "أمريكا",
+        "usa": "الولايات المتحدة", "nuclear": "نووي", "threat": "تهديد",
+        "tension": "توتر", "conflict": "نزاع", "troops": "قوات",
+        "invasion": "غزو", "bombing": "قصف", "airstrike": "غارة جوية",
+        "assassination": "اغتيال", "dead": "قتيل", "wounded": "جريح",
+        "forces": "قوات", "army": "جيش", "navy": "بحرية",
+        "airforce": "قوات جوية", "pentagon": "البنتاغون",
+        "white house": "البيت الأبيض", "congress": "الكونغرس",
+        "president": "الرئيس", "prime minister": "رئيس الوزراء",
+        "minister": "وزير", "general": "جنرال", "commander": "قائد",
+        "red sea": "البحر الأحمر", "hormuz": "هرمز", "gulf": "الخليج",
+        "tehran": "طهران", "tel aviv": "تل أبيب", "washington": "واشنطن",
+        "netanyahu": "نتنياهو", "khamenei": "خامنئي", "trump": "ترامب",
+        "biden": "بايدن", "irgc": "الحرس الثوري", "hezbollah": "حزب الله",
+        "houthi": "الحوثيين", "hamas": "حماس", "idf": "الجيش الإسرائيلي",
+        "ceasefire": "وقف إطلاق النار", "peace": "سلام", "deal": "صفقة",
+        "sanctions": "عقوبات", "oil": "نفط", "gas": "غاز",
+        "ballistic": "باليستي", "cruise": "كروز", "warship": "سفينة حربية",
+        "fighter jet": "مقاتلة", "tank": "دبابة", "soldiers": "جنود",
+        "casualties": "ضحايا", "civilians": "مدنيون", "hospital": "مستشفى",
+        "reports": "تقارير", "according to": "وفقاً لـ", "sources": "مصادر",
+        "confirmed": "مؤكد", "unconfirmed": "غير مؤكد", "breaking": "عاجل",
+        "exclusive": "حصري", "urgent": "عاجل", "developing": "متطور",
+        "latest": "أحدث", "update": "تحديث", "news": "أخبار",
+    }
+    
+    result = text
+    text_lower = text.lower()
+    for en, ar in translations.items():
+        if en in text_lower:
+            result = re.sub(re.escape(en), ar, result, flags=re.IGNORECASE)
+    
+    return result
+
+
+def translate_news_item(item: dict) -> dict:
+    """ترجمة عنوان ووصف الخبر إلى العربية"""
+    translated = item.copy()
+    
+    # ترجمة العنوان إذا كان إنجليزياً
+    arabic_in_title = sum(1 for c in item.get('title', '') if '\u0600' <= c <= '\u06FF')
+    if arabic_in_title < len(item.get('title', '')) * 0.3:
+        translated['title_ar'] = translate_to_arabic(item.get('title', ''), title=True)
+        translated['title_original'] = item.get('title', '')
+    else:
+        translated['title_ar'] = item.get('title', '')
+        translated['title_original'] = item.get('title', '')
+    
+    # ترجمة الوصف
+    arabic_in_desc = sum(1 for c in item.get('description', '') if '\u0600' <= c <= '\u06FF')
+    if arabic_in_desc < len(item.get('description', '')) * 0.3:
+        translated['description_ar'] = translate_to_arabic(item.get('description', ''))
+    else:
+        translated['description_ar'] = item.get('description', '')
+    
+    return translated
+
+
+# ═══════════════════════════════════════════════════════════
 #           🤖 تحليل بالذكاء الاصطناعي
 # ═══════════════════════════════════════════════════════════
 def analyze_with_ai(title: str, description: str, source: str) -> dict:
@@ -311,11 +412,14 @@ def fetch_all_news(force=False) -> list:
 #              🎨 تنسيق الرسائل
 # ═══════════════════════════════════════════════════════════
 def format_news(item: dict, ai: dict, index: int = 0, total: int = 0) -> str:
+    # ترجمة الخبر للعربية
+    item = translate_news_item(item)
+    
     alert = ai.get('alert_level', '🟡')
     importance = ai.get('importance', 'متوسط')
     verified = ai.get('verified', 'قيد التحقق')
     threat = ai.get('threat_level', 'متوسط')
-    summary = ai.get('summary_ar', item.get('description', '')[:200])
+    summary = ai.get('summary_ar', item.get('description_ar', item.get('description', ''))[:200])
     tags = " ".join(["#" + t.replace(' ', '_') for t in ai.get('tags', [])[:4]])
     countries = " | ".join(ai.get('countries', [])[:3])
 
@@ -325,13 +429,18 @@ def format_news(item: dict, ai: dict, index: int = 0, total: int = 0) -> str:
 
     trust = item.get('trust', 0)
     trust_bar = "█" * (trust // 10) + "░" * (10 - trust // 10)
-    
     has_video = "📹 يحتوي على فيديو" if item.get('video_url') else ""
     counter = f"📊 {index}/{total}" if total > 0 else ""
+    
+    # العنوان المترجم
+    title_ar = html.escape(item.get('title_ar', item.get('title', '')))
+    title_orig = item.get('title_original', '')
+    # إظهار الأصل إذا كان إنجليزي
+    orig_line = f"\n🔤 <i>{html.escape(title_orig[:100])}</i>" if title_orig and title_orig != item.get('title_ar','') else ""
 
     msg = f"""{alert}{alert} <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b> {alert}{alert}
 
-💥 <b>{html.escape(item.get('title', ''))}</b>
+💥 <b>{title_ar}</b>{orig_line}
 
 <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
 {verify_icons.get(verified, '🔄 قيد التحقق')}
@@ -339,7 +448,7 @@ def format_news(item: dict, ai: dict, index: int = 0, total: int = 0) -> str:
 💢 {threat_icons.get(threat, '🟡 متوسط')}
 {has_video}
 
-🤖 <b>تحليل AI:</b>
+🤖 <b>تحليل AI بالعربية:</b>
 <i>{html.escape(str(summary)[:280])}</i>
 
 {('🌍 <b>الدول:</b> ' + html.escape(countries)) if countries else ''}
@@ -354,7 +463,7 @@ def format_news(item: dict, ai: dict, index: int = 0, total: int = 0) -> str:
 {('<a href="' + item['link'] + '">🔗 اقرأ الخبر كاملاً</a>') if item.get('link') else ''}
 
 <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
-⚡ <i>تطوير: عباس الشافعي</i> | 🤖 <i>Claude AI v3 PRO</i>"""
+👑 <b>عباس الشافعي</b> | ⚡ <i>المطور الأول للأخبار</i>"""
 
     return msg
 
@@ -373,7 +482,7 @@ def format_breaking(item: dict) -> str:
 {('<a href="' + item['link'] + '">🔗 اقرأ التفاصيل الآن</a>') if item.get('link') else ''}
 
 {'═' * 30}
-⚡ <i>تطوير: عباس الشافعي</i> | 🤖 <i>AI News Bot PRO</i>"""
+👑 <b>عباس الشافعي</b> | ⚡ <i>المطور الأول للأخبار</i>"""
 
 
 # ═══════════════════════════════════════════════════════════
@@ -469,9 +578,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • 🎯 فلترة متقدمة حسب النوع
 
 {'═' * 32}
-👨‍💻 <b>تطوير:</b> عباس الشافعي
-🤖 <b>مدعوم بـ:</b> Claude AI (Anthropic)
-📅 <b>الإصدار:</b> 3.0 ULTRA PRO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👑 <b>المطوّر:</b> عباس الشافعي
+🏆 <b>الإصدار:</b> 3.0 ULTRA PRO
+⚡ <b>الأقوى | الأسرع | الأدق</b>
 {'═' * 32}
 
 اختر من القائمة 👇"""
@@ -492,7 +602,7 @@ async def cmd_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         for item in video_news[:5]:
             try:
-                caption = f"📹 <b>{html.escape(item['title'][:200])}</b>\n\n{item.get('flag','')} {html.escape(item['source'])}\n🕐 {item['time']}\n\n⚡ <i>تطوير: عباس الشافعي</i>"
+                caption = f"📹 <b>{html.escape(item['title'][:200])}</b>\n\n{item.get('flag','')} {html.escape(item['source'])}\n🕐 {item['time']}\n\n👑 <b>عباس الشافعي</b>"
                 await context.bot.send_video(
                     update.effective_chat.id,
                     video=item['video_url'],
@@ -519,7 +629,7 @@ async def cmd_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎬 <a href="https://arabic.rt.com/video/">RT عربي فيديو</a>
 📡 <a href="https://www.france24.com/ar/فيديو/">فرانس 24 فيديو</a>
 
-⚡ <i>تطوير: عباس الشافعي</i>""",
+👑 <b>عباس الشافعي</b>""",
             reply_markup=main_keyboard()
         )
 
@@ -687,7 +797,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 <b>أبرز المصادر:</b>
 {sources_list}
 {'━'*28}
-⚡ <i>تطوير: عباس الشافعي | Claude AI v3 PRO</i>"""
+👑 <b>عباس الشافعي</b> | ⚡ <i>المطور الأول للأخبار</i>"""
     await update.message.reply_html(msg, reply_markup=main_keyboard())
 
 
@@ -708,7 +818,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /unsubscribe - إيقاف التنبيهات 🔕
 /stats - الإحصائيات 📊
 {'━'*28}
-⚡ <i>تطوير: عباس الشافعي | v3 PRO</i>"""
+👑 <b>عباس الشافعي</b> | ⚡ <i>المطور الأول للأخبار</i>"""
     await update.message.reply_html(msg, reply_markup=main_keyboard())
 
 
@@ -805,7 +915,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📡 <a href="https://www.france24.com/ar/فيديو/">فرانس 24 فيديو</a>
 🎯 <a href="https://www.militarytimes.com/">Military Times</a>
 
-⚡ <i>تطوير: عباس الشافعي</i>""")
+👑 <b>عباس الشافعي</b>""")
 
     elif data == "today":
         await query.edit_message_text(f"🔴 أخبار اليوم {datetime.now().strftime('%d/%m/%Y')}...", parse_mode=ParseMode.HTML)
@@ -873,7 +983,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         src = "📡 <b>مصادر الأخبار - 20 مصدر</b>\n" + "━"*28 + "\n\n"
         for name, info in NEWS_SOURCES.items():
             src += f"{info['flag']} <b>{name}</b> - ثقة {info['trust']}%\n"
-        src += "\n⚡ <i>تطوير: عباس الشافعي</i>"
+        src += "\n👑 <b>عباس الشافعي</b>"
         await query.edit_message_text(src, reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
 
     elif data == "stats":
@@ -889,12 +999,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📡 20 مصدر عالمي وعربي
 📹 فيديوهات الهجمات
 ⚡ أخبار لحظية
-🤖 Claude AI للتحليل
+🏅 نظام ذكاء اصطناعي متقدم
 ✅ نظام التحقق الذكي
 🚨 تنبيهات فورية
 
 👨‍💻 <b>تطوير:</b> عباس الشافعي
-🤖 <b>AI:</b> Claude (Anthropic)
+🏆 <b>المطور:</b> عباس الشافعي
 📅 <b>الإصدار:</b> 3.0 ULTRA PRO""",
             reply_markup=main_keyboard(), parse_mode=ParseMode.HTML
         )
@@ -922,7 +1032,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🌍 <b>الدول:</b> {html.escape(', '.join(ai.get('countries', [])))}
 🏷️ <b>الوسوم:</b> {' '.join(['#' + t for t in ai.get('tags', [])])}
 {'═'*30}
-⚡ <i>Claude AI v3 PRO | عباس الشافعي</i>"""
+👑 <b>عباس الشافعي</b> | ⚡ <i>المطور الأول للأخبار</i>"""
             await send(analysis)
 
     elif data.startswith("vid_"):
@@ -933,7 +1043,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await context.bot.send_video(
                         chat_id, video=item['video_url'],
-                        caption=f"📹 {html.escape(item['title'][:200])}\n\n{item.get('flag','')} {html.escape(item['source'])}\n⚡ عباس الشافعي",
+                        caption=f"📹 {html.escape(item['title'][:200])}\n\n{item.get('flag','')} {html.escape(item['source'])}\n👑 عباس الشافعي",
                         parse_mode=ParseMode.HTML
                     )
                 except:
@@ -1010,7 +1120,7 @@ def main():
 ╔══════════════════════════════════════════════════════════╗
 ║  🔴💥 بوت أخبار الحرب PRO v3.0 - يبدأ التشغيل 💥🔴  ║
 ║          👨‍💻 تطوير: عباس الشافعي                       ║
-║          🤖 بدعم: Claude AI (Anthropic)                  ║
+║          👑 تطوير: عباس الشافعي                  ║
 ║          📡 20 مصدر | 📹 فيديوهات | ⚡ لحظي            ║
 ╚══════════════════════════════════════════════════════════╝
     """)
