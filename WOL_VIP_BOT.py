@@ -4,7 +4,6 @@ import time
 import logging
 import asyncio
 import aiohttp
-import aiofiles
 import tempfile
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -76,10 +75,13 @@ async def fetch_video_info(url: str):
 
 
 async def fast_download(video_url: str) -> str | None:
+    """تحميل بدون aiofiles — يستخدم write عادي"""
+    tmp_path = None
     try:
         tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
         tmp_path = tmp.name
         tmp.close()
+
         async with aiohttp.ClientSession(headers=HEADERS) as session:
             async with session.get(
                 video_url,
@@ -87,16 +89,17 @@ async def fast_download(video_url: str) -> str | None:
             ) as resp:
                 if resp.status != 200:
                     return None
-                async with aiofiles.open(tmp_path, "wb") as f:
+                with open(tmp_path, "wb") as f:
                     async for chunk in resp.content.iter_chunked(512 * 1024):
-                        await f.write(chunk)
+                        f.write(chunk)
+
         if os.path.getsize(tmp_path) < 5000:
             os.remove(tmp_path)
             return None
         return tmp_path
     except:
         try:
-            if os.path.exists(tmp_path):
+            if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
         except:
             pass
@@ -207,7 +210,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "╔══════════════════════════╗\n"
         "🤖  WOL AI ENHANCER  👑\n"
         "╚══════════════════════════╝\n\n"
-        "⚙️ AI يحلل الفيديو ويختار الجودة..."
+        "⚙️ AI يحلل الفيديو..."
     )
 
     info = await fetch_video_info(url)
