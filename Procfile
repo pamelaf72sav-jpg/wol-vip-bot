@@ -1,1 +1,1 @@
-worker: python WOL_VIP_BOT.py
+worker: cd war-news-bot && python bot.py
