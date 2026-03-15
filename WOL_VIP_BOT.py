@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-╔══════════════════════════════════════════════════════╗
-║     🔴 بوت أخبار الحرب - تطوير: عباس الشافعي 🔴     ║
-║         نظام ذكاء اصطناعي للتحقق من الأخبار          ║
-╚══════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║   🔴💥 بوت أخبار الحرب PRO - تطوير: عباس الشافعي 💥🔴    ║
+║     نظام ذكاء اصطناعي متقدم | فيديوهات | أخبار لحظية       ║
+║              الإصدار 3.0 ULTRA PRO                          ║
+╚══════════════════════════════════════════════════════════════╝
 """
 
 import asyncio
@@ -14,13 +15,15 @@ import requests
 import json
 import re
 import html
-from datetime import datetime
+import hashlib
+from datetime import datetime, timedelta
 from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
+    Update, InlineKeyboardButton, InlineKeyboardMarkup,
+    InputMediaVideo, InputMediaPhoto
 )
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
-    ContextTypes
+    MessageHandler, filters, ContextTypes
 )
 from telegram.constants import ParseMode
 
@@ -28,100 +31,105 @@ from telegram.constants import ParseMode
 #           ⚙️ الإعدادات الأساسية
 # ═══════════════════════════════════════
 BOT_TOKEN = "8781378692:AAFeeRwOVk50JDcra4aZhmaHzaH_vbRXr7M"
-ANTHROPIC_API_KEY = "YOUR_ANTHROPIC_API_KEY_HERE"  # ← ضع مفتاح Anthropic هنا
+ANTHROPIC_API_KEY = ""  # ← ضع مفتاح Anthropic هنا
 ADMIN_CHAT_ID = 5909444412
 
-# ═══════════════════════════════════════
-#        📡 مصادر الأخبار الموثوقة
-# ═══════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+#        📡 مصادر الأخبار الموثوقة - 20 مصدر عالمي
+# ═══════════════════════════════════════════════════════════
 NEWS_SOURCES = {
-    "🌍 رويترز عربي": {
-        "url": "https://feeds.reuters.com/reuters/arabicTopNews",
-        "lang": "ar", "trust": 95, "flag": "🇬🇧"
-    },
-    "📺 الجزيرة": {
-        "url": "https://www.aljazeera.net/xml/rss/all.xml",
-        "lang": "ar", "trust": 88, "flag": "🇶🇦"
-    },
-    "📻 بي بي سي عربي": {
-        "url": "http://feeds.bbci.co.uk/arabic/rss.xml",
-        "lang": "ar", "trust": 93, "flag": "🇬🇧"
-    },
-    "📡 العربية": {
-        "url": "https://www.alarabiya.net/tools/rss/ar/العربية.xml",
-        "lang": "ar", "trust": 82, "flag": "🇸🇦"
-    },
-    "🌐 أسوشيتد برس": {
-        "url": "https://feeds.apnews.com/rss/apf-topnews",
-        "lang": "en", "trust": 94, "flag": "🇺🇸"
-    },
-    "📰 الغارديان": {
-        "url": "https://www.theguardian.com/world/iran/rss",
-        "lang": "en", "trust": 90, "flag": "🇬🇧"
-    },
-    "🗞️ فرانس 24 عربي": {
-        "url": "https://www.france24.com/ar/rss",
-        "lang": "ar", "trust": 87, "flag": "🇫🇷"
-    },
-    "📢 سكاي نيوز عربية": {
-        "url": "https://www.skynewsarabia.com/rss.xml",
-        "lang": "ar", "trust": 80, "flag": "🇦🇪"
-    },
+    # عربية
+    "🌍 رويترز عربي":    {"url": "https://feeds.reuters.com/reuters/arabicTopNews", "lang": "ar", "trust": 95, "flag": "🇬🇧"},
+    "📺 الجزيرة":        {"url": "https://www.aljazeera.net/xml/rss/all.xml", "lang": "ar", "trust": 88, "flag": "🇶🇦"},
+    "📻 بي بي سي عربي":  {"url": "http://feeds.bbci.co.uk/arabic/rss.xml", "lang": "ar", "trust": 93, "flag": "🇬🇧"},
+    "📡 العربية":        {"url": "https://www.alarabiya.net/tools/rss/ar/العربية.xml", "lang": "ar", "trust": 82, "flag": "🇸🇦"},
+    "🗞️ فرانس 24":      {"url": "https://www.france24.com/ar/rss", "lang": "ar", "trust": 87, "flag": "🇫🇷"},
+    "📢 سكاي نيوز":      {"url": "https://www.skynewsarabia.com/rss.xml", "lang": "ar", "trust": 80, "flag": "🇦🇪"},
+    "🎙️ RT عربي":       {"url": "https://arabic.rt.com/rss/", "lang": "ar", "trust": 75, "flag": "🇷🇺"},
+    "📰 اندبندنت عربي":  {"url": "https://www.independentarabia.com/feeds/rss", "lang": "ar", "trust": 83, "flag": "🇬🇧"},
+    # عالمية
+    "🌐 أسوشيتد برس":    {"url": "https://feeds.apnews.com/rss/apf-topnews", "lang": "en", "trust": 94, "flag": "🇺🇸"},
+    "📰 الغارديان":      {"url": "https://www.theguardian.com/world/iran/rss", "lang": "en", "trust": 90, "flag": "🇬🇧"},
+    "🗺️ BBC World":     {"url": "http://feeds.bbci.co.uk/news/world/rss.xml", "lang": "en", "trust": 93, "flag": "🇬🇧"},
+    "📊 Reuters World":  {"url": "https://feeds.reuters.com/reuters/worldNews", "lang": "en", "trust": 95, "flag": "🇬🇧"},
+    "🇺🇸 CNN":           {"url": "http://rss.cnn.com/rss/edition_world.rss", "lang": "en", "trust": 85, "flag": "🇺🇸"},
+    "📡 Al Jazeera EN":  {"url": "https://www.aljazeera.com/xml/rss/all.xml", "lang": "en", "trust": 88, "flag": "🇶🇦"},
+    "🗞️ Times of Israel":{"url": "https://www.timesofisrael.com/feed/", "lang": "en", "trust": 82, "flag": "🇮🇱"},
+    "⚡ Middle East Eye": {"url": "https://www.middleeasteye.net/rss", "lang": "en", "trust": 80, "flag": "🌍"},
+    "🎯 Jerusalem Post":  {"url": "https://www.jpost.com/rss/rssfeedsfrontpage.aspx", "lang": "en", "trust": 80, "flag": "🇮🇱"},
+    "🏛️ Defense News":   {"url": "https://www.defensenews.com/arc/outboundfeeds/rss/", "lang": "en", "trust": 88, "flag": "🇺🇸"},
+    "⚔️ Military Times":  {"url": "https://www.militarytimes.com/arc/outboundfeeds/rss/", "lang": "en", "trust": 85, "flag": "🇺🇸"},
+    "🌏 PRESS TV":        {"url": "https://www.presstv.ir/rss.xml", "lang": "en", "trust": 70, "flag": "🇮🇷"},
 }
 
-# ═══════════════════════════════════════
-#       🔍 كلمات مفتاحية للحرب
-# ═══════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+#    📹 مصادر فيديوهات الهجمات والأخبار العسكرية
+# ═══════════════════════════════════════════════════════════
+VIDEO_SOURCES = {
+    "LiveUA Map": "https://liveuamap.com/",
+    "ISW": "https://understandingwar.org/",
+    "Telegram Channels": [
+        "https://t.me/s/iraninternational_fa",
+        "https://t.me/s/MEE_Arabic",
+        "https://t.me/s/AlMayadeenLive",
+    ]
+}
+
+# كلمات مفتاحية الحرب
 WAR_KEYWORDS = [
-    "إيران", "أمريكا", "إسرائيل", "حرب", "هجوم", "ضربة",
-    "صاروخ", "طائرة مسيّرة", "عملية عسكرية", "توتر",
-    "تهديد", "مواجهة", "غارة", "انفجار", "اغتيال",
-    "نووي", "حرس الثوري", "حزب الله", "الحوثيين",
-    "البنتاغون", "تل أبيب", "طهران", "واشنطن",
-    "البحر الأحمر", "مضيق هرمز", "غزة", "لبنان",
-    "iran", "israel", "america", "usa", "war", "attack",
-    "strike", "missile", "drone", "military", "nuclear",
-    "irgc", "hezbollah", "houthi", "pentagon", "tehran",
-    "netanyahu", "khamenei", "trump", "red sea", "hormuz"
+    "إيران", "أمريكا", "إسرائيل", "حرب", "هجوم", "ضربة", "صاروخ",
+    "طائرة مسيّرة", "عملية عسكرية", "توتر", "تهديد", "غارة", "انفجار",
+    "اغتيال", "نووي", "حرس الثوري", "حزب الله", "الحوثيين", "البنتاغون",
+    "تل أبيب", "طهران", "واشنطن", "البحر الأحمر", "مضيق هرمز", "غزة",
+    "لبنان", "سوريا", "العراق", "اليمن", "قصف", "مدفعية", "دبابة",
+    "iran", "israel", "america", "usa", "war", "attack", "strike",
+    "missile", "drone", "military", "nuclear", "irgc", "hezbollah",
+    "houthi", "pentagon", "tehran", "netanyahu", "khamenei", "trump",
+    "red sea", "hormuz", "explosion", "bombing", "airstrike", "killed",
+    "assassination", "conflict", "troops", "invasion", "offensive"
 ]
 
-# ═══════════════════════════════════════
-#         📊 تخزين مؤقت للبيانات
-# ═══════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+#              💾 تخزين البيانات
+# ═══════════════════════════════════════════════════════════
 news_cache = {}
 sent_news_ids = set()
 subscribed_users = set()
 breaking_subscribers = set()
+video_subscribers = set()
 last_fetch_time = None
+stats = {"total_news": 0, "breaking_sent": 0, "users": 0}
 
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# ═══════════════════════════════════════════════════════
-#                🤖 تحليل بالذكاء الاصطناعي
-# ═══════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+#           🤖 تحليل بالذكاء الاصطناعي
+# ═══════════════════════════════════════════════════════════
 def analyze_with_ai(title: str, description: str, source: str) -> dict:
-    """تحليل الخبر باستخدام Claude API مباشرة"""
     default = {
-        "verified": "قيد التحقق",
-        "importance": "متوسط",
-        "summary_ar": (description[:200] if description else title),
-        "alert_level": "🟡",
-        "tags": [],
-        "countries": [],
-        "threat_level": "متوسط"
+        "verified": "قيد التحقق", "importance": "متوسط",
+        "summary_ar": description[:200] if description else title,
+        "alert_level": "🟡", "tags": [], "countries": [],
+        "threat_level": "متوسط", "has_video": False,
+        "video_keywords": []
     }
-
-    if ANTHROPIC_API_KEY == "YOUR_ANTHROPIC_API_KEY_HERE":
+    if not ANTHROPIC_API_KEY:
+        # تحليل بسيط بدون AI
+        text = (title + " " + description).lower()
+        if any(w in text for w in ["انفجار", "ضربة", "هجوم", "قصف", "explosion", "strike", "attack", "bombing"]):
+            default["importance"] = "عاجل"
+            default["alert_level"] = "🔴"
+            default["threat_level"] = "عالي"
+        elif any(w in text for w in ["تهديد", "توتر", "threat", "tension", "warning"]):
+            default["importance"] = "مهم"
+            default["alert_level"] = "🟠"
         return default
 
     try:
-        prompt = f"""أنت محلل أخبار عسكرية وسياسية محترف.
-حلل هذا الخبر وأعد JSON فقط بدون أي نص إضافي:
+        prompt = f"""أنت محلل أخبار عسكري وسياسي متخصص.
+حلل هذا الخبر وأعد JSON فقط بدون أي نص:
 
 العنوان: {title}
 المصدر: {source}
@@ -133,9 +141,11 @@ def analyze_with_ai(title: str, description: str, source: str) -> dict:
   "importance": "عاجل" أو "مهم" أو "متوسط" أو "عادي",
   "summary_ar": "ملخص بالعربية جملة واحدة",
   "alert_level": "🔴" أو "🟠" أو "🟡" أو "🟢",
-  "tags": ["وسم1", "وسم2"],
+  "tags": ["وسم1", "وسم2", "وسم3"],
   "countries": ["دولة1", "دولة2"],
-  "threat_level": "عالي" أو "متوسط" أو "منخفض"
+  "threat_level": "عالي" أو "متوسط" أو "منخفض",
+  "has_video": true أو false,
+  "video_keywords": ["كلمة1", "كلمة2"]
 }}"""
 
         response = requests.post(
@@ -147,96 +157,160 @@ def analyze_with_ai(title: str, description: str, source: str) -> dict:
             },
             json={
                 "model": "claude-sonnet-4-20250514",
-                "max_tokens": 400,
+                "max_tokens": 500,
                 "messages": [{"role": "user", "content": prompt}]
             },
             timeout=15
         )
-
         if response.status_code == 200:
-            data = response.json()
-            text = data["content"][0]["text"].strip()
-            # تنظيف JSON
+            text = response.json()["content"][0]["text"].strip()
             if "```json" in text:
                 text = text.split("```json")[1].split("```")[0].strip()
             elif "```" in text:
                 text = text.split("```")[1].split("```")[0].strip()
             return json.loads(text)
-
     except Exception as e:
         logger.error(f"AI Error: {e}")
-
     return default
 
 
-# ═══════════════════════════════════════════════════════
-#              📡 جلب الأخبار من المصادر
-# ═══════════════════════════════════════════════════════
-def fetch_all_news() -> list:
-    """جلب الأخبار من جميع المصادر"""
+# ═══════════════════════════════════════════════════════════
+#         📹 البحث عن فيديوهات الهجمات
+# ═══════════════════════════════════════════════════════════
+def search_attack_videos(keywords: list) -> list:
+    """البحث عن فيديوهات الهجمات من مصادر موثوقة"""
+    videos = []
+    
+    # مصادر فيديو موثوقة مع روابط مباشرة
+    video_news_sources = [
+        {
+            "url": "https://feeds.reuters.com/reuters/video",
+            "name": "Reuters Video",
+            "flag": "🎥"
+        },
+        {
+            "url": "https://www.aljazeera.com/xml/rss/all.xml",
+            "name": "Al Jazeera Video",
+            "flag": "📹"
+        },
+    ]
+    
+    for source in video_news_sources:
+        try:
+            feed = feedparser.parse(source["url"])
+            for entry in feed.entries[:5]:
+                title = entry.get('title', '')
+                text = title.lower()
+                if any(kw.lower() in text for kw in keywords):
+                    # استخراج رابط الفيديو
+                    video_url = None
+                    if hasattr(entry, 'media_content'):
+                        for media in entry.media_content:
+                            if 'video' in media.get('type', ''):
+                                video_url = media.get('url')
+                                break
+                    
+                    videos.append({
+                        "title": title,
+                        "url": entry.get('link', ''),
+                        "video_url": video_url,
+                        "source": source["name"],
+                        "flag": source["flag"]
+                    })
+        except:
+            pass
+    
+    return videos[:3]
+
+
+# ═══════════════════════════════════════════════════════════
+#              📡 جلب الأخبار
+# ═══════════════════════════════════════════════════════════
+def fetch_all_news(force=False) -> list:
     global news_cache, last_fetch_time
+
     all_news = []
+    headers = {'User-Agent': 'Mozilla/5.0 WarNewsBot/3.0'}
 
     for source_name, source_info in NEWS_SOURCES.items():
         try:
-            headers = {'User-Agent': 'Mozilla/5.0 NewsBot/2.0'}
             feed = feedparser.parse(source_info["url"], request_headers=headers)
-
             for entry in feed.entries[:8]:
                 title = entry.get('title', '')
                 desc = re.sub(r'<[^>]+>', '', entry.get('summary', entry.get('description', '')))
                 link = entry.get('link', '')
-
-                # فحص ارتباط الخبر بالحرب
+                
                 text_check = (title + " " + desc).lower()
                 if not any(kw.lower() in text_check for kw in WAR_KEYWORDS):
                     continue
 
                 # استخراج صورة
                 image_url = None
+                video_url = None
+                
                 if hasattr(entry, 'media_content') and entry.media_content:
-                    image_url = entry.media_content[0].get('url')
-                elif hasattr(entry, 'enclosures') and entry.enclosures:
+                    for media in entry.media_content:
+                        mtype = media.get('type', '')
+                        if 'video' in mtype:
+                            video_url = media.get('url')
+                        elif 'image' in mtype and not image_url:
+                            image_url = media.get('url')
+                
+                if not image_url and hasattr(entry, 'enclosures') and entry.enclosures:
                     for enc in entry.enclosures:
-                        if 'image' in enc.get('type', ''):
+                        t = enc.get('type', '')
+                        if 'image' in t:
                             image_url = enc.get('href', enc.get('url'))
-                            break
+                        elif 'video' in t:
+                            video_url = enc.get('href', enc.get('url'))
+
+                # تحديد هل الخبر عاجل بناءً على الكلمات
+                is_urgent = any(w in text_check for w in [
+                    "انفجار", "ضربة", "هجوم عسكري", "اغتيال", "قصف",
+                    "explosion", "airstrike", "assassination", "attack", "strike now"
+                ])
 
                 news_item = {
-                    "id": hash(title[:40] + link[:20]),
+                    "id": int(hashlib.md5((title[:30] + link[:20]).encode()).hexdigest()[:8], 16),
                     "title": title,
-                    "description": desc[:500],
+                    "description": desc[:600],
                     "link": link,
                     "source": source_name,
                     "flag": source_info["flag"],
                     "trust": source_info["trust"],
                     "image_url": image_url,
-                    "time": datetime.now().strftime('%H:%M')
+                    "video_url": video_url,
+                    "is_urgent": is_urgent,
+                    "time": datetime.now().strftime('%H:%M'),
+                    "date": datetime.now().strftime('%d/%m/%Y'),
                 }
                 all_news.append(news_item)
-
         except Exception as e:
-            logger.error(f"Error fetching {source_name}: {e}")
+            logger.error(f"Error {source_name}: {e}")
 
     # إزالة المكرر
     unique_news = []
     seen = set()
     for item in all_news:
-        key = item['title'][:40].lower()
+        key = item['title'][:35].lower()
         if key not in seen:
             seen.add(key)
             unique_news.append(item)
 
+    # ترتيب - العاجل أولاً
+    unique_news.sort(key=lambda x: x.get('is_urgent', False), reverse=True)
+    
     news_cache = {item['id']: item for item in unique_news}
     last_fetch_time = datetime.now()
+    stats["total_news"] = len(unique_news)
+    
     return unique_news
 
 
-# ═══════════════════════════════════════════════════════
-#              🎨 تنسيق رسائل الأخبار
-# ═══════════════════════════════════════════════════════
-def format_news(item: dict, ai: dict) -> str:
-    """تنسيق الخبر بشكل احترافي"""
+# ═══════════════════════════════════════════════════════════
+#              🎨 تنسيق الرسائل
+# ═══════════════════════════════════════════════════════════
+def format_news(item: dict, ai: dict, index: int = 0, total: int = 0) -> str:
     alert = ai.get('alert_level', '🟡')
     importance = ai.get('importance', 'متوسط')
     verified = ai.get('verified', 'قيد التحقق')
@@ -245,65 +319,71 @@ def format_news(item: dict, ai: dict) -> str:
     tags = " ".join(["#" + t.replace(' ', '_') for t in ai.get('tags', [])[:4]])
     countries = " | ".join(ai.get('countries', [])[:3])
 
-    verify_map = {
-        "مؤكد": "✅ مؤكد",
-        "غير مؤكد": "❌ غير مؤكد",
-        "قيد التحقق": "🔄 قيد التحقق"
-    }
-    importance_map = {
-        "عاجل": "🚨 عاجل جداً",
-        "مهم": "⚠️ مهم",
-        "متوسط": "📌 متوسط",
-        "عادي": "📋 عادي"
-    }
-    threat_map = {
-        "عالي": "🔴 عالي",
-        "متوسط": "🟡 متوسط",
-        "منخفض": "🟢 منخفض"
-    }
+    verify_icons = {"مؤكد": "✅ مؤكد", "غير مؤكد": "❌ غير مؤكد", "قيد التحقق": "🔄 قيد التحقق"}
+    importance_icons = {"عاجل": "🚨 عاجل جداً", "مهم": "⚠️ مهم", "متوسط": "📌 متوسط", "عادي": "📋 عادي"}
+    threat_icons = {"عالي": "🔴 خطر عالي", "متوسط": "🟡 متوسط", "منخفض": "🟢 منخفض"}
 
     trust = item.get('trust', 0)
     trust_bar = "█" * (trust // 10) + "░" * (10 - trust // 10)
+    
+    has_video = "📹 يحتوي على فيديو" if item.get('video_url') else ""
+    counter = f"📊 {index}/{total}" if total > 0 else ""
 
-    title_safe = html.escape(item.get('title', ''))
-    summary_safe = html.escape(str(summary)[:250])
+    msg = f"""{alert}{alert} <b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b> {alert}{alert}
 
-    msg = f"""{alert}{alert}{alert} <b>━━━━━━━━━━━━━━━━━━━━━━</b>
+💥 <b>{html.escape(item.get('title', ''))}</b>
 
-📰 <b>{title_safe}</b>
-
-<b>━━━━━━━━━━━━━━━━━━━━━━</b>
-{verify_map.get(verified, '🔄 قيد التحقق')}
-{importance_map.get(importance, '📌 متوسط')}
-💢 مستوى التهديد: {threat_map.get(threat, '🟡 متوسط')}
+<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
+{verify_icons.get(verified, '🔄 قيد التحقق')}
+{importance_icons.get(importance, '📌 متوسط')}
+💢 {threat_icons.get(threat, '🟡 متوسط')}
+{has_video}
 
 🤖 <b>تحليل AI:</b>
-<i>{summary_safe}</i>
+<i>{html.escape(str(summary)[:280])}</i>
 
 {('🌍 <b>الدول:</b> ' + html.escape(countries)) if countries else ''}
 {tags}
 
-<b>━━━━━━━━━━━━━━━━━━━━━━</b>
+<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
 {item.get('flag', '🌍')} <b>المصدر:</b> {html.escape(item.get('source', ''))}
 📊 <b>الموثوقية:</b> {trust}% <code>[{trust_bar}]</code>
-🕐 <b>الوقت:</b> {item.get('time', '')}
+🕐 <b>الوقت:</b> {item.get('time', '')} | {item.get('date', '')}
+{counter}
 
 {('<a href="' + item['link'] + '">🔗 اقرأ الخبر كاملاً</a>') if item.get('link') else ''}
 
-<b>━━━━━━━━━━━━━━━━━━━━━━</b>
-⚡ <i>تطوير: عباس الشافعي</i> | 🤖 <i>Claude AI</i>"""
+<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>
+⚡ <i>تطوير: عباس الشافعي</i> | 🤖 <i>Claude AI v3 PRO</i>"""
 
     return msg
 
 
-# ═══════════════════════════════════════════════════════
+def format_breaking(item: dict) -> str:
+    """تنسيق الأخبار العاجلة"""
+    return f"""🚨🚨🚨 <b>⚡ خبر عاجل الآن ⚡</b> 🚨🚨🚨
+{'═' * 30}
+
+💥 <b>{html.escape(item.get('title', ''))}</b>
+
+{'═' * 30}
+{item.get('flag', '🌍')} <b>المصدر:</b> {html.escape(item.get('source', ''))}
+🕐 <b>الوقت:</b> {item.get('time', '')}
+
+{('<a href="' + item['link'] + '">🔗 اقرأ التفاصيل الآن</a>') if item.get('link') else ''}
+
+{'═' * 30}
+⚡ <i>تطوير: عباس الشافعي</i> | 🤖 <i>AI News Bot PRO</i>"""
+
+
+# ═══════════════════════════════════════════════════════════
 #              ⌨️ لوحات المفاتيح
-# ═══════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
 def main_keyboard():
     kb = [
         [
             InlineKeyboardButton("📰 آخر الأخبار", callback_data="latest"),
-            InlineKeyboardButton("🚨 الأخبار العاجلة", callback_data="breaking")
+            InlineKeyboardButton("🚨 عاجل الآن", callback_data="breaking")
         ],
         [
             InlineKeyboardButton("🇮🇷 إيران", callback_data="iran"),
@@ -311,69 +391,87 @@ def main_keyboard():
             InlineKeyboardButton("🇮🇱 إسرائيل", callback_data="israel")
         ],
         [
-            InlineKeyboardButton("💥 عمليات عسكرية", callback_data="military"),
-            InlineKeyboardButton("☢️ الملف النووي", callback_data="nuclear")
+            InlineKeyboardButton("📹 فيديوهات الهجمات", callback_data="videos"),
+            InlineKeyboardButton("💥 عمليات عسكرية", callback_data="military")
         ],
         [
-            InlineKeyboardButton("✅ أخبار مؤكدة", callback_data="verified"),
-            InlineKeyboardButton("❓ غير مؤكدة", callback_data="unverified")
+            InlineKeyboardButton("☢️ الملف النووي", callback_data="nuclear"),
+            InlineKeyboardButton("🚀 صواريخ ومسيّرات", callback_data="missiles")
+        ],
+        [
+            InlineKeyboardButton("🔴 أخبار اليوم فقط", callback_data="today"),
+            InlineKeyboardButton("⚡ أقوى الأخبار", callback_data="top_news")
+        ],
+        [
+            InlineKeyboardButton("✅ مؤكدة", callback_data="verified"),
+            InlineKeyboardButton("❓ غير مؤكدة", callback_data="unverified"),
+            InlineKeyboardButton("🔄 قيد التحقق", callback_data="pending")
         ],
         [
             InlineKeyboardButton("🔔 تفعيل التنبيهات", callback_data="sub"),
-            InlineKeyboardButton("🔕 إيقاف التنبيهات", callback_data="unsub")
+            InlineKeyboardButton("📹 تنبيهات الفيديو", callback_data="video_sub")
         ],
         [
-            InlineKeyboardButton("📡 المصادر", callback_data="sources"),
-            InlineKeyboardButton("📊 إحصائيات", callback_data="stats")
+            InlineKeyboardButton("🔕 إيقاف التنبيهات", callback_data="unsub"),
+            InlineKeyboardButton("📡 المصادر", callback_data="sources")
         ],
         [
-            InlineKeyboardButton("ℹ️ عن البوت", callback_data="about"),
-            InlineKeyboardButton("❓ المساعدة", callback_data="help_menu")
+            InlineKeyboardButton("📊 إحصائيات", callback_data="stats"),
+            InlineKeyboardButton("ℹ️ عن البوت", callback_data="about")
         ]
     ]
     return InlineKeyboardMarkup(kb)
 
 
-def news_keyboard(news_id: int):
+def news_keyboard(news_id: int, has_video: bool = False):
     kb = [
         [
             InlineKeyboardButton("🤖 تحليل AI", callback_data=f"ai_{news_id}"),
             InlineKeyboardButton("🔄 تحديث", callback_data="latest")
         ],
-        [InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="home")]
     ]
+    if has_video:
+        kb.append([InlineKeyboardButton("📹 شاهد الفيديو", callback_data=f"vid_{news_id}")])
+    kb.append([InlineKeyboardButton("🏠 القائمة", callback_data="home")])
     return InlineKeyboardMarkup(kb)
 
 
-# ═══════════════════════════════════════════════════════
-#                  📱 أوامر البوت
-# ═══════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+#              📱 أوامر البوت
+# ═══════════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat_id = update.effective_chat.id
     subscribed_users.add(chat_id)
+    stats["users"] = len(subscribed_users)
 
-    msg = f"""🔴🔴🔴 <b>بوت أخبار الحرب</b> 🔴🔴🔴
+    msg = f"""🔴💥🔴 <b>بوت أخبار الحرب PRO</b> 🔴💥🔴
 {'═' * 32}
 
 مرحباً <b>{html.escape(user.first_name)}</b> 👋
 
-🤖 <b>النظام الإخباري الذكي</b>
-تغطية شاملة لأخبار الحرب بين:
+🤖 <b>النظام الإخباري الأقوى</b>
+تغطية لحظية للحرب بين:
 🇺🇸 أمريكا | 🇮🇷 إيران | 🇮🇱 إسرائيل
 
 {'━' * 30}
-📡 <b>المصادر:</b> رويترز، الجزيرة، BBC، العربية، AP، فرانس 24، سكاي نيوز وأكثر
+📡 <b>20 مصدر عالمي وعربي موثوق</b>
+رويترز | BBC | AP | الجزيرة | العربية
+فرانس24 | CNN | Defense News | وأكثر
 
-🤖 <b>مميزات AI:</b>
-• ✅ التحقق من صحة الأخبار
-• 📊 تحليل مستوى التهديد
-• 🚨 تنبيهات فورية للعاجل
-• 🌍 تغطية عربية وعالمية
+🆕 <b>مميزات الإصدار 3.0 PRO:</b>
+• 📹 فيديوهات الهجمات والعمليات
+• ⚡ أخبار اليوم فقط لحظة بلحظة
+• 🚨 تنبيهات فورية للعمليات العسكرية
+• 🤖 تحليل AI متقدم للأخبار
+• ✅ نظام التحقق الذكي
+• 📊 مستوى التهديد لكل خبر
+• 🎯 فلترة متقدمة حسب النوع
 
 {'═' * 32}
 👨‍💻 <b>تطوير:</b> عباس الشافعي
-🤖 <b>مدعوم بـ:</b> Claude AI
+🤖 <b>مدعوم بـ:</b> Claude AI (Anthropic)
+📅 <b>الإصدار:</b> 3.0 ULTRA PRO
 {'═' * 32}
 
 اختر من القائمة 👇"""
@@ -381,20 +479,168 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html(msg, reply_markup=main_keyboard())
 
 
+async def cmd_videos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """جلب فيديوهات الهجمات"""
+    await update.message.reply_text("📹 جاري البحث عن فيديوهات الهجمات...")
+    
+    news = fetch_all_news()
+    video_news = [n for n in news if n.get('video_url')]
+    
+    if video_news:
+        await update.message.reply_html(
+            f"📹 <b>تم العثور على {len(video_news)} فيديو</b>\n{'━'*20}"
+        )
+        for item in video_news[:5]:
+            try:
+                caption = f"📹 <b>{html.escape(item['title'][:200])}</b>\n\n{item.get('flag','')} {html.escape(item['source'])}\n🕐 {item['time']}\n\n⚡ <i>تطوير: عباس الشافعي</i>"
+                await context.bot.send_video(
+                    update.effective_chat.id,
+                    video=item['video_url'],
+                    caption=caption,
+                    parse_mode=ParseMode.HTML
+                )
+                await asyncio.sleep(1)
+            except:
+                # إرسال رابط إذا فشل الفيديو
+                ai = analyze_with_ai(item['title'], item['description'], item['source'])
+                msg = format_news(item, ai)
+                await update.message.reply_html(msg, reply_markup=news_keyboard(item['id'], True))
+    else:
+        # البحث عن أخبار بها صور مع روابط فيديو
+        await update.message.reply_html(
+            """📹 <b>فيديوهات الهجمات والعمليات</b>
+{'━'*28}
+
+لمشاهدة أحدث فيديوهات الهجمات من مصادر موثوقة:
+
+🔴 <a href="https://liveuamap.com/">LiveUA Map - خريطة حية</a>
+🎥 <a href="https://www.reuters.com/news/archive/videoNews">Reuters Video</a>
+📺 <a href="https://www.aljazeera.net/videos/">الجزيرة فيديو</a>
+🎬 <a href="https://arabic.rt.com/video/">RT عربي فيديو</a>
+📡 <a href="https://www.france24.com/ar/فيديو/">فرانس 24 فيديو</a>
+
+⚡ <i>تطوير: عباس الشافعي</i>""",
+            reply_markup=main_keyboard()
+        )
+
+
+async def cmd_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """أخبار اليوم فقط"""
+    await update.message.reply_text("🔴 جاري جلب أخبار اليوم...")
+    news = fetch_all_news()
+    
+    header = f"""🔴 <b>أخبار اليوم - {datetime.now().strftime('%d/%m/%Y')}</b>
+{'═'*30}
+⏰ آخر تحديث: {datetime.now().strftime('%H:%M')}
+📊 تم العثور على <b>{len(news)}</b> خبر
+{'═'*30}"""
+    
+    await update.message.reply_html(header)
+    
+    for item in news[:5]:
+        ai = analyze_with_ai(item['title'], item['description'], item['source'])
+        msg = format_news(item, ai)
+        
+        try:
+            if item.get('image_url'):
+                await update.message.reply_photo(
+                    photo=item['image_url'],
+                    caption=msg[:1024],
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=news_keyboard(item['id'], bool(item.get('video_url')))
+                )
+            else:
+                await update.message.reply_html(msg, reply_markup=news_keyboard(item['id']))
+        except:
+            await update.message.reply_html(msg, reply_markup=news_keyboard(item['id']))
+        await asyncio.sleep(0.5)
+
+
+async def cmd_missiles(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """أخبار الصواريخ والمسيّرات"""
+    await update.message.reply_text("🚀 جاري البحث عن أخبار الصواريخ والمسيّرات...")
+    keywords = ["صاروخ", "مسيّرة", "باليستي", "كروز", "missile", "drone", "ballistic", "rocket", "UAV"]
+    news = fetch_all_news()
+    filtered = [n for n in news if any(k.lower() in (n['title']+n['description']).lower() for k in keywords)]
+    
+    if filtered:
+        for item in filtered[:4]:
+            ai = analyze_with_ai(item['title'], item['description'], item['source'])
+            await update.message.reply_html(format_news(item, ai), reply_markup=news_keyboard(item['id']))
+            await asyncio.sleep(0.4)
+    else:
+        await update.message.reply_html("📭 لا توجد أخبار صواريخ حالياً", reply_markup=main_keyboard())
+
+
+async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """أقوى الأخبار"""
+    await update.message.reply_text("⚡ جاري جلب أقوى الأخبار...")
+    news = fetch_all_news()
+    # ترتيب حسب الأهمية
+    urgent = [n for n in news if n.get('is_urgent', False)]
+    top_news = urgent[:5] if urgent else news[:5]
+    
+    await update.message.reply_html(
+        f"⚡ <b>أقوى {len(top_news)} أخبار الآن</b>",
+        reply_markup=main_keyboard()
+    )
+    
+    for item in top_news:
+        ai = analyze_with_ai(item['title'], item['description'], item['source'])
+        try:
+            if item.get('image_url'):
+                await update.message.reply_photo(
+                    photo=item['image_url'],
+                    caption=format_news(item, ai)[:1024],
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=news_keyboard(item['id'])
+                )
+            else:
+                await update.message.reply_html(format_news(item, ai), reply_markup=news_keyboard(item['id']))
+        except:
+            await update.message.reply_html(format_news(item, ai), reply_markup=news_keyboard(item['id']))
+        await asyncio.sleep(0.5)
+
+
+# ═══════════════════════════════════════════════════════════
+#     أوامر أساسية
+# ═══════════════════════════════════════════════════════════
+async def send_filtered(reply_fn, keywords, country):
+    news = fetch_all_news()
+    filtered = [n for n in news if any(k.lower() in (n['title']+n['description']).lower() for k in keywords)]
+    if not filtered:
+        await reply_fn(f"📭 لا توجد أخبار عن {country} حالياً", reply_markup=main_keyboard())
+        return
+    for item in filtered[:4]:
+        ai = analyze_with_ai(item['title'], item['description'], item['source'])
+        await reply_fn(format_news(item, ai), reply_markup=news_keyboard(item['id'], bool(item.get('video_url'))))
+        await asyncio.sleep(0.4)
+
+
 async def cmd_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("⏳ جاري جلب الأخبار...")
-    await send_news_list(update.message.reply_html, [])
+    await update.message.reply_text("⏳ جاري جلب أحدث الأخبار من 20 مصدر...")
+    await cmd_today(update, context)
 
 
 async def cmd_breaking(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔍 جاري البحث عن أخبار عاجلة...")
     news = fetch_all_news()
     found = False
-    for item in news[:15]:
+    for item in news[:20]:
         ai = analyze_with_ai(item['title'], item['description'], item['source'])
-        if ai.get('importance') == 'عاجل':
-            msg = format_news(item, ai)
-            await update.message.reply_html(msg, reply_markup=news_keyboard(item['id']))
+        if ai.get('importance') in ['عاجل', 'مهم'] or item.get('is_urgent'):
+            try:
+                if item.get('image_url'):
+                    await update.message.reply_photo(
+                        photo=item['image_url'],
+                        caption=format_news(item, ai)[:1024],
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=news_keyboard(item['id'])
+                    )
+                else:
+                    await update.message.reply_html(format_news(item, ai), reply_markup=news_keyboard(item['id']))
+            except:
+                await update.message.reply_html(format_news(item, ai), reply_markup=news_keyboard(item['id']))
             found = True
             await asyncio.sleep(0.5)
     if not found:
@@ -403,176 +649,184 @@ async def cmd_breaking(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_iran(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🇮🇷 جاري جلب أخبار إيران...")
-    await send_filtered(update.message.reply_html, ["إيران", "iran", "طهران", "خامنئي", "irgc", "حرس الثوري"], "🇮🇷 إيران")
+    await send_filtered(update.message.reply_html, ["إيران", "iran", "طهران", "خامنئي", "irgc", "حرس الثوري", "persian"], "🇮🇷 إيران")
 
 
 async def cmd_usa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🇺🇸 جاري جلب أخبار أمريكا...")
-    await send_filtered(update.message.reply_html, ["أمريكا", "america", "usa", "واشنطن", "ترامب", "بايدن", "pentagon"], "🇺🇸 أمريكا")
+    await send_filtered(update.message.reply_html, ["أمريكا", "america", "usa", "واشنطن", "ترامب", "بايدن", "pentagon", "البنتاغون"], "🇺🇸 أمريكا")
 
 
 async def cmd_israel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🇮🇱 جاري جلب أخبار إسرائيل...")
-    await send_filtered(update.message.reply_html, ["إسرائيل", "israel", "تل أبيب", "نتنياهو", "netanyahu", "غزة"], "🇮🇱 إسرائيل")
+    await send_filtered(update.message.reply_html, ["إسرائيل", "israel", "تل أبيب", "نتنياهو", "netanyahu", "غزة", "idf"], "🇮🇱 إسرائيل")
 
 
 async def cmd_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     breaking_subscribers.add(update.effective_chat.id)
-    await update.message.reply_html(
-        "🔔 <b>تم تفعيل التنبيهات العاجلة!</b>\n\n✅ ستصلك الأخبار العاجلة فوراً\n\n/unsubscribe للإيقاف",
-        reply_markup=main_keyboard()
-    )
+    await update.message.reply_html("🔔 <b>تم تفعيل تنبيهات الأخبار العاجلة!</b>\n\n✅ ستصلك الأخبار العاجلة فوراً\n/unsubscribe للإيقاف", reply_markup=main_keyboard())
 
 
 async def cmd_unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     breaking_subscribers.discard(update.effective_chat.id)
-    await update.message.reply_html("🔕 <b>تم إيقاف التنبيهات</b>\n\n/subscribe للتفعيل", reply_markup=main_keyboard())
+    video_subscribers.discard(update.effective_chat.id)
+    await update.message.reply_html("🔕 <b>تم إيقاف جميع التنبيهات</b>", reply_markup=main_keyboard())
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = f"""📊 <b>إحصائيات البوت</b>
-{'━' * 28}
+    sources_list = "\n".join([f"  {info['flag']} {name} - {info['trust']}%" for name, info in list(NEWS_SOURCES.items())[:10]])
+    msg = f"""📊 <b>إحصائيات البوت PRO</b>
+{'━'*28}
 📰 أخبار محفوظة: <b>{len(news_cache)}</b>
 👥 المشتركون: <b>{len(breaking_subscribers)}</b>
-📡 المصادر النشطة: <b>{len(NEWS_SOURCES)}</b>
-🕐 آخر تحديث: <b>{last_fetch_time.strftime('%H:%M - %d/%m/%Y') if last_fetch_time else 'لم يتم بعد'}</b>
-{'━' * 28}
-⚡ <i>تطوير: عباس الشافعي</i>"""
+📹 مشتركو الفيديو: <b>{len(video_subscribers)}</b>
+📡 المصادر: <b>{len(NEWS_SOURCES)}</b>
+🕐 آخر تحديث: <b>{last_fetch_time.strftime('%H:%M') if last_fetch_time else 'لم يتم'}</b>
+🚨 تنبيهات أرسلت: <b>{stats['breaking_sent']}</b>
+{'━'*28}
+<b>أبرز المصادر:</b>
+{sources_list}
+{'━'*28}
+⚡ <i>تطوير: عباس الشافعي | Claude AI v3 PRO</i>"""
     await update.message.reply_html(msg, reply_markup=main_keyboard())
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = """📖 <b>الأوامر المتاحة</b>
-{'━' * 28}
+    msg = """📖 <b>أوامر البوت PRO</b>
+{'━'*28}
 /start - القائمة الرئيسية
-/news - آخر الأخبار
-/breaking - الأخبار العاجلة
+/news - آخر الأخبار من 20 مصدر
+/breaking - الأخبار العاجلة 🚨
+/today - أخبار اليوم فقط 🔴
+/top - أقوى الأخبار ⚡
+/videos - فيديوهات الهجمات 📹
+/missiles - أخبار الصواريخ 🚀
 /iran - أخبار إيران 🇮🇷
 /usa - أخبار أمريكا 🇺🇸
 /israel - أخبار إسرائيل 🇮🇱
 /subscribe - تفعيل التنبيهات 🔔
 /unsubscribe - إيقاف التنبيهات 🔕
 /stats - الإحصائيات 📊
-/help - المساعدة ❓
-{'━' * 28}
-⚡ <i>تطوير: عباس الشافعي</i>"""
+{'━'*28}
+⚡ <i>تطوير: عباس الشافعي | v3 PRO</i>"""
     await update.message.reply_html(msg, reply_markup=main_keyboard())
 
 
-# ═══════════════════════════════════════════════════════
-#              🔧 دوال مساعدة
-# ═══════════════════════════════════════════════════════
-async def send_news_list(reply_fn, keywords: list):
-    news = fetch_all_news()
-    if keywords:
-        filtered = [n for n in news if any(k.lower() in (n['title']+n['description']).lower() for k in keywords)]
-    else:
-        filtered = news
-
-    if not filtered:
-        await reply_fn("📭 <b>لا توجد أخبار متاحة حالياً</b>", reply_markup=main_keyboard())
-        return
-
-    for item in filtered[:4]:
-        ai = analyze_with_ai(item['title'], item['description'], item['source'])
-        msg = format_news(item, ai)
-        await reply_fn(msg, reply_markup=news_keyboard(item['id']))
-        await asyncio.sleep(0.4)
-
-
-async def send_filtered(reply_fn, keywords: list, country: str):
-    news = fetch_all_news()
-    filtered = [n for n in news if any(k.lower() in (n['title']+n['description']).lower() for k in keywords)]
-
-    if not filtered:
-        await reply_fn(f"📭 <b>لا توجد أخبار عن {country} حالياً</b>", reply_markup=main_keyboard())
-        return
-
-    for item in filtered[:4]:
-        ai = analyze_with_ai(item['title'], item['description'], item['source'])
-        msg = format_news(item, ai)
-        await reply_fn(msg, reply_markup=news_keyboard(item['id']))
-        await asyncio.sleep(0.4)
-
-
-# ═══════════════════════════════════════════════════════
-#           🎯 معالج الأزرار التفاعلية
-# ═══════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+#           🎯 معالج الأزرار
+# ═══════════════════════════════════════════════════════════
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
     chat_id = query.message.chat.id
 
-    async def send(msg, kb=None):
+    async def send(msg, kb=None, photo=None):
         try:
-            await context.bot.send_message(
-                chat_id, msg,
-                parse_mode=ParseMode.HTML,
-                reply_markup=kb or main_keyboard()
-            )
+            if photo:
+                await context.bot.send_photo(chat_id, photo=photo, caption=msg[:1024], parse_mode=ParseMode.HTML, reply_markup=kb or main_keyboard())
+            else:
+                await context.bot.send_message(chat_id, msg, parse_mode=ParseMode.HTML, reply_markup=kb or main_keyboard())
         except Exception as e:
             logger.error(f"Send error: {e}")
 
+    async def send_news_list(keywords=None, label=""):
+        news = fetch_all_news()
+        filtered = [n for n in news if not keywords or any(k.lower() in (n['title']+n['description']).lower() for k in keywords)]
+        if not filtered:
+            await send(f"📭 لا توجد أخبار {label} حالياً")
+            return
+        for item in filtered[:3]:
+            ai = analyze_with_ai(item['title'], item['description'], item['source'])
+            await send(format_news(item, ai), news_keyboard(item['id'], bool(item.get('video_url'))), item.get('image_url'))
+            await asyncio.sleep(0.4)
+
     if data == "home":
-        await query.edit_message_text(
-            "🏠 <b>القائمة الرئيسية</b>",
-            reply_markup=main_keyboard(),
-            parse_mode=ParseMode.HTML
-        )
+        await query.edit_message_text("🏠 <b>القائمة الرئيسية</b>", reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
 
     elif data == "latest":
-        await query.edit_message_text("⏳ جاري جلب الأخبار...", parse_mode=ParseMode.HTML)
-        news = fetch_all_news()
-        if news:
-            for item in news[:3]:
-                ai = analyze_with_ai(item['title'], item['description'], item['source'])
-                await send(format_news(item, ai), news_keyboard(item['id']))
-                await asyncio.sleep(0.4)
-        else:
-            await send("📭 لا توجد أخبار حالياً")
+        await query.edit_message_text("⏳ جاري جلب آخر الأخبار من 20 مصدر...", parse_mode=ParseMode.HTML)
+        await send_news_list()
 
     elif data == "breaking":
         await query.edit_message_text("🔍 جاري البحث...", parse_mode=ParseMode.HTML)
         news = fetch_all_news()
         found = False
-        for item in news[:15]:
+        for item in news[:20]:
             ai = analyze_with_ai(item['title'], item['description'], item['source'])
-            if ai.get('importance') in ['عاجل', 'مهم']:
-                await send(format_news(item, ai), news_keyboard(item['id']))
+            if ai.get('importance') in ['عاجل', 'مهم'] or item.get('is_urgent'):
+                await send(format_news(item, ai), news_keyboard(item['id']), item.get('image_url'))
                 found = True
                 await asyncio.sleep(0.4)
                 break
         if not found:
-            await send("📭 <b>لا توجد أخبار عاجلة حالياً</b>")
+            await send("📭 لا توجد أخبار عاجلة حالياً")
 
     elif data == "iran":
         await query.edit_message_text("🇮🇷 جاري جلب أخبار إيران...", parse_mode=ParseMode.HTML)
-        await send_filtered(send, ["إيران", "iran", "طهران", "خامنئي", "irgc"], "🇮🇷 إيران")
+        await send_news_list(["إيران", "iran", "طهران", "خامنئي", "irgc"], "عن إيران")
 
     elif data == "usa":
         await query.edit_message_text("🇺🇸 جاري جلب أخبار أمريكا...", parse_mode=ParseMode.HTML)
-        await send_filtered(send, ["أمريكا", "america", "usa", "واشنطن", "ترامب"], "🇺🇸 أمريكا")
+        await send_news_list(["أمريكا", "america", "usa", "واشنطن", "ترامب", "pentagon"], "عن أمريكا")
 
     elif data == "israel":
         await query.edit_message_text("🇮🇱 جاري جلب أخبار إسرائيل...", parse_mode=ParseMode.HTML)
-        await send_filtered(send, ["إسرائيل", "israel", "تل أبيب", "نتنياهو", "غزة"], "🇮🇱 إسرائيل")
+        await send_news_list(["إسرائيل", "israel", "تل أبيب", "نتنياهو", "غزة"], "عن إسرائيل")
 
     elif data == "military":
         await query.edit_message_text("💥 جاري جلب أخبار العمليات...", parse_mode=ParseMode.HTML)
-        await send_filtered(send, ["هجوم", "ضربة", "صاروخ", "مسيّرة", "strike", "missile", "drone", "attack"], "💥 العمليات العسكرية")
+        await send_news_list(["هجوم", "ضربة", "قصف", "عملية", "strike", "attack", "bombing", "airstrike"], "عسكرية")
 
     elif data == "nuclear":
         await query.edit_message_text("☢️ جاري جلب الأخبار النووية...", parse_mode=ParseMode.HTML)
-        await send_filtered(send, ["نووي", "nuclear", "تخصيب", "uranium", "يورانيوم", "برنامج نووي"], "☢️ الملف النووي")
+        await send_news_list(["نووي", "nuclear", "تخصيب", "uranium", "يورانيوم", "مفاعل"], "نووية")
+
+    elif data == "missiles":
+        await query.edit_message_text("🚀 جاري جلب أخبار الصواريخ...", parse_mode=ParseMode.HTML)
+        await send_news_list(["صاروخ", "مسيّرة", "باليستي", "missile", "drone", "ballistic"], "عن الصواريخ")
+
+    elif data == "videos":
+        await query.edit_message_text("📹 جاري البحث عن الفيديوهات...", parse_mode=ParseMode.HTML)
+        news = fetch_all_news()
+        video_news = [n for n in news if n.get('video_url')]
+        if video_news:
+            for item in video_news[:3]:
+                ai = analyze_with_ai(item['title'], item['description'], item['source'])
+                await send(format_news(item, ai), news_keyboard(item['id'], True))
+        else:
+            await send("""📹 <b>روابط فيديوهات الهجمات المباشرة</b>
+{'━'*28}
+
+🔴 <a href="https://liveuamap.com/">LiveUA Map - خريطة حية</a>
+🎥 <a href="https://www.reuters.com/news/archive/videoNews">Reuters Video</a>
+📺 <a href="https://www.aljazeera.net/videos/">الجزيرة فيديو</a>
+🎬 <a href="https://arabic.rt.com/video/">RT عربي فيديو</a>
+📡 <a href="https://www.france24.com/ar/فيديو/">فرانس 24 فيديو</a>
+🎯 <a href="https://www.militarytimes.com/">Military Times</a>
+
+⚡ <i>تطوير: عباس الشافعي</i>""")
+
+    elif data == "today":
+        await query.edit_message_text(f"🔴 أخبار اليوم {datetime.now().strftime('%d/%m/%Y')}...", parse_mode=ParseMode.HTML)
+        await send_news_list()
+
+    elif data == "top_news":
+        await query.edit_message_text("⚡ جاري جلب أقوى الأخبار...", parse_mode=ParseMode.HTML)
+        news = fetch_all_news()
+        urgent = [n for n in news if n.get('is_urgent', False)] or news[:5]
+        for item in urgent[:3]:
+            ai = analyze_with_ai(item['title'], item['description'], item['source'])
+            await send(format_news(item, ai), news_keyboard(item['id']), item.get('image_url'))
+            await asyncio.sleep(0.4)
 
     elif data == "verified":
-        await query.edit_message_text("✅ جاري البحث عن الأخبار المؤكدة...", parse_mode=ParseMode.HTML)
+        await query.edit_message_text("✅ جاري البحث...", parse_mode=ParseMode.HTML)
         news = fetch_all_news()
         found = False
         for item in news[:15]:
             ai = analyze_with_ai(item['title'], item['description'], item['source'])
-            if ai.get('verified') == 'مؤكد':
+            if ai.get('verified') == 'مؤكد' or item.get('trust', 0) >= 90:
                 await send(format_news(item, ai), news_keyboard(item['id']))
                 found = True
                 await asyncio.sleep(0.4)
@@ -580,7 +834,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send("📭 لا توجد أخبار مؤكدة حالياً")
 
     elif data == "unverified":
-        await query.edit_message_text("❓ جاري البحث عن الأخبار غير المؤكدة...", parse_mode=ParseMode.HTML)
+        await query.edit_message_text("❓ جاري البحث...", parse_mode=ParseMode.HTML)
         news = fetch_all_news()
         found = False
         for item in news[:15]:
@@ -590,165 +844,187 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 found = True
                 await asyncio.sleep(0.4)
         if not found:
-            await send("📭 لا توجد أخبار غير مؤكدة في قاعدة البيانات")
+            await send("📭 لا توجد أخبار غير مؤكدة حالياً")
+
+    elif data == "pending":
+        await query.edit_message_text("🔄 جاري البحث...", parse_mode=ParseMode.HTML)
+        news = fetch_all_news()
+        for item in news[:3]:
+            ai = analyze_with_ai(item['title'], item['description'], item['source'])
+            if ai.get('verified') == 'قيد التحقق':
+                await send(format_news(item, ai), news_keyboard(item['id']))
+                await asyncio.sleep(0.4)
 
     elif data == "sub":
         breaking_subscribers.add(chat_id)
-        await query.edit_message_text(
-            "🔔 <b>تم تفعيل التنبيهات!</b>\n\n✅ ستصلك الأخبار العاجلة فوراً",
-            reply_markup=main_keyboard(),
-            parse_mode=ParseMode.HTML
-        )
+        await query.edit_message_text("🔔 <b>تم تفعيل تنبيهات الأخبار العاجلة!</b>\n\n✅ ستصلك الأخبار فوراً", reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
+
+    elif data == "video_sub":
+        video_subscribers.add(chat_id)
+        breaking_subscribers.add(chat_id)
+        await query.edit_message_text("📹🔔 <b>تم تفعيل تنبيهات الفيديو والأخبار العاجلة!</b>", reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
 
     elif data == "unsub":
         breaking_subscribers.discard(chat_id)
-        await query.edit_message_text(
-            "🔕 <b>تم إيقاف التنبيهات</b>",
-            reply_markup=main_keyboard(),
-            parse_mode=ParseMode.HTML
-        )
+        video_subscribers.discard(chat_id)
+        await query.edit_message_text("🔕 <b>تم إيقاف جميع التنبيهات</b>", reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
 
     elif data == "sources":
-        sources_text = "📡 <b>مصادر الأخبار الموثوقة</b>\n" + "━" * 28 + "\n\n"
+        src = "📡 <b>مصادر الأخبار - 20 مصدر</b>\n" + "━"*28 + "\n\n"
         for name, info in NEWS_SOURCES.items():
-            sources_text += f"{info['flag']} <b>{name}</b>\n"
-            sources_text += f"   📊 مستوى الثقة: {info['trust']}%\n"
-            sources_text += f"   🌐 اللغة: {'العربية' if info['lang'] == 'ar' else 'الإنجليزية'}\n\n"
-        sources_text += "━" * 28 + "\n⚡ <i>تطوير: عباس الشافعي</i>"
-        await query.edit_message_text(sources_text, reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
+            src += f"{info['flag']} <b>{name}</b> - ثقة {info['trust']}%\n"
+        src += "\n⚡ <i>تطوير: عباس الشافعي</i>"
+        await query.edit_message_text(src, reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
 
     elif data == "stats":
-        stats = f"""📊 <b>إحصائيات البوت</b>
-{'━' * 28}
-📰 أخبار محفوظة: <b>{len(news_cache)}</b>
-👥 المشتركون: <b>{len(breaking_subscribers)}</b>
-📡 المصادر: <b>{len(NEWS_SOURCES)}</b>
-🕐 آخر تحديث: <b>{last_fetch_time.strftime('%H:%M') if last_fetch_time else 'لم يتم'}</b>
-{'━' * 28}
-⚡ <i>تطوير: عباس الشافعي</i>"""
-        await query.edit_message_text(stats, reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
+        await query.edit_message_text(
+            f"📊 <b>الإحصائيات</b>\n{'━'*20}\n📰 {len(news_cache)} خبر\n👥 {len(breaking_subscribers)} مشترك\n📡 {len(NEWS_SOURCES)} مصدر\n🕐 {last_fetch_time.strftime('%H:%M') if last_fetch_time else 'لم يتم'}",
+            reply_markup=main_keyboard(), parse_mode=ParseMode.HTML
+        )
 
     elif data == "about":
-        about = """🤖 <b>عن بوت أخبار الحرب</b>
-{'═' * 30}
+        await query.edit_message_text(
+            """🤖 <b>بوت أخبار الحرب PRO</b>
+{'═'*30}
+📡 20 مصدر عالمي وعربي
+📹 فيديوهات الهجمات
+⚡ أخبار لحظية
+🤖 Claude AI للتحليل
+✅ نظام التحقق الذكي
+🚨 تنبيهات فورية
 
-🎯 <b>الهدف:</b>
-تغطية إخبارية ذكية لأخبار الحرب بين أمريكا وإسرائيل وإيران
-
-📡 <b>المصادر:</b>
-8 مصادر عالمية وعربية موثوقة
-
-🤖 <b>الذكاء الاصطناعي:</b>
-• التحقق من صحة الأخبار
-• تحليل مستوى التهديد
-• تلخيص الأخبار بالعربية
-• تنبيهات الأخبار العاجلة
-
-{'━' * 30}
 👨‍💻 <b>تطوير:</b> عباس الشافعي
 🤖 <b>AI:</b> Claude (Anthropic)
-📅 <b>الإصدار:</b> 2.0 Pro
-{'═' * 30}"""
-        await query.edit_message_text(about, reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
-
-    elif data == "help_menu":
-        help_text = """❓ <b>المساعدة</b>
-{'━' * 28}
-الأوامر المتاحة:
-/start - القائمة الرئيسية
-/news - آخر الأخبار
-/breaking - الأخبار العاجلة
-/iran | /usa | /israel - أخبار حسب الدولة
-/subscribe - تفعيل التنبيهات
-/unsubscribe - إيقاف التنبيهات
-/stats - الإحصائيات
-
-مستويات التحقق:
-✅ مؤكد | ❌ غير مؤكد | 🔄 قيد التحقق
-
-مستويات الأهمية:
-🚨 عاجل | ⚠️ مهم | 📌 متوسط | 📋 عادي
-{'━' * 28}
-⚡ <i>تطوير: عباس الشافعي</i>"""
-        await query.edit_message_text(help_text, reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
+📅 <b>الإصدار:</b> 3.0 ULTRA PRO""",
+            reply_markup=main_keyboard(), parse_mode=ParseMode.HTML
+        )
 
     elif data.startswith("ai_"):
         news_id = int(data[3:])
         if news_id in news_cache:
             item = news_cache[news_id]
             ai = analyze_with_ai(item['title'], item['description'], item['source'])
-            analysis = f"""🤖 <b>تحليل الذكاء الاصطناعي</b>
-{'═' * 30}
+            analysis = f"""🤖 <b>تحليل الذكاء الاصطناعي المتقدم</b>
+{'═'*30}
 
 📰 <b>{html.escape(item['title'][:100])}</b>
 
-{'━' * 28}
-🔍 <b>التحقق:</b> {ai.get('verified', 'غير محدد')}
-⚠️ <b>الأهمية:</b> {ai.get('importance', 'متوسط')}
-💢 <b>التهديد:</b> {ai.get('threat_level', 'متوسط')}
+{'━'*28}
+🔍 <b>التحقق:</b> {ai.get('verified', '—')}
+⚠️ <b>الأهمية:</b> {ai.get('importance', '—')}
+💢 <b>التهديد:</b> {ai.get('threat_level', '—')}
 {ai.get('alert_level', '🟡')} <b>مستوى التنبيه</b>
+📹 <b>فيديو:</b> {'نعم ✅' if ai.get('has_video') else 'لا ❌'}
 
 📝 <b>الملخص:</b>
 <i>{html.escape(str(ai.get('summary_ar', ''))[:300])}</i>
 
 🌍 <b>الدول:</b> {html.escape(', '.join(ai.get('countries', [])))}
 🏷️ <b>الوسوم:</b> {' '.join(['#' + t for t in ai.get('tags', [])])}
-{'═' * 30}
-⚡ <i>Claude AI Analysis | عباس الشافعي</i>"""
-
+{'═'*30}
+⚡ <i>Claude AI v3 PRO | عباس الشافعي</i>"""
             await send(analysis)
 
+    elif data.startswith("vid_"):
+        news_id = int(data[4:])
+        if news_id in news_cache:
+            item = news_cache[news_id]
+            if item.get('video_url'):
+                try:
+                    await context.bot.send_video(
+                        chat_id, video=item['video_url'],
+                        caption=f"📹 {html.escape(item['title'][:200])}\n\n{item.get('flag','')} {html.escape(item['source'])}\n⚡ عباس الشافعي",
+                        parse_mode=ParseMode.HTML
+                    )
+                except:
+                    await send(f"📹 رابط الفيديو:\n{item.get('link', '')}")
+            else:
+                await send("📹 لا يوجد فيديو لهذا الخبر")
 
-# ═══════════════════════════════════════════════════════
-#           ⏰ مهمة دورية للتنبيهات العاجلة
-# ═══════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════
+#         ⏰ التنبيهات التلقائية كل 10 دقائق
+# ═══════════════════════════════════════════════════════════
 async def auto_alerts(context: ContextTypes.DEFAULT_TYPE):
-    """فحص الأخبار العاجلة كل 15 دقيقة وإرسال تنبيهات"""
-    if not breaking_subscribers:
+    """فحص تلقائي كل 10 دقائق"""
+    if not breaking_subscribers and not video_subscribers:
         return
 
     try:
         news = fetch_all_news()
+        
         for item in news:
             if item['id'] in sent_news_ids:
                 continue
+            
             ai = analyze_with_ai(item['title'], item['description'], item['source'])
-            if ai.get('importance') == 'عاجل':
+            is_breaking = ai.get('importance') == 'عاجل' or item.get('is_urgent', False)
+            has_video = bool(item.get('video_url'))
+            
+            if is_breaking:
                 sent_news_ids.add(item['id'])
                 msg = "🚨🚨 <b>تنبيه عاجل!</b> 🚨🚨\n\n" + format_news(item, ai)
-
+                stats["breaking_sent"] += 1
+                
                 for chat_id in list(breaking_subscribers):
                     try:
-                        await context.bot.send_message(
-                            chat_id, msg,
-                            parse_mode=ParseMode.HTML,
-                            reply_markup=main_keyboard()
-                        )
+                        if item.get('image_url'):
+                            await context.bot.send_photo(
+                                chat_id, photo=item['image_url'],
+                                caption=msg[:1024], parse_mode=ParseMode.HTML,
+                                reply_markup=main_keyboard()
+                            )
+                        else:
+                            await context.bot.send_message(
+                                chat_id, msg, parse_mode=ParseMode.HTML,
+                                reply_markup=main_keyboard()
+                            )
                         await asyncio.sleep(0.1)
-                    except Exception:
+                    except:
                         breaking_subscribers.discard(chat_id)
+            
+            # إرسال فيديو لمشتركي الفيديو
+            if has_video and video_subscribers:
+                vid_msg = f"📹🚨 <b>فيديو عاجل!</b>\n\n{html.escape(item['title'])}\n\n{item.get('flag','')} {html.escape(item['source'])}"
+                for chat_id in list(video_subscribers):
+                    try:
+                        await context.bot.send_video(
+                            chat_id, video=item['video_url'],
+                            caption=vid_msg, parse_mode=ParseMode.HTML
+                        )
+                    except:
+                        try:
+                            await context.bot.send_message(chat_id, vid_msg + f"\n\n🔗 {item.get('link','')}", parse_mode=ParseMode.HTML)
+                        except:
+                            video_subscribers.discard(chat_id)
+
     except Exception as e:
         logger.error(f"Auto alerts error: {e}")
 
 
-# ═══════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
 #                   🚀 تشغيل البوت
-# ═══════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
 def main():
     print("""
-╔══════════════════════════════════════════════════╗
-║  🔴  بوت أخبار الحرب - يبدأ التشغيل  🔴       ║
-║       👨‍💻 تطوير: عباس الشافعي                   ║
-║       🤖 بدعم: Claude AI (Anthropic)             ║
-╚══════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════╗
+║  🔴💥 بوت أخبار الحرب PRO v3.0 - يبدأ التشغيل 💥🔴  ║
+║          👨‍💻 تطوير: عباس الشافعي                       ║
+║          🤖 بدعم: Claude AI (Anthropic)                  ║
+║          📡 20 مصدر | 📹 فيديوهات | ⚡ لحظي            ║
+╚══════════════════════════════════════════════════════════╝
     """)
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # تسجيل الأوامر
+    # الأوامر
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("news", cmd_news))
     app.add_handler(CommandHandler("breaking", cmd_breaking))
+    app.add_handler(CommandHandler("today", cmd_today))
+    app.add_handler(CommandHandler("top", cmd_top))
+    app.add_handler(CommandHandler("videos", cmd_videos))
+    app.add_handler(CommandHandler("missiles", cmd_missiles))
     app.add_handler(CommandHandler("iran", cmd_iran))
     app.add_handler(CommandHandler("usa", cmd_usa))
     app.add_handler(CommandHandler("israel", cmd_israel))
@@ -757,11 +1033,11 @@ def main():
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("help", cmd_help))
 
-    # معالج الأزرار
+    # الأزرار
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # مهمة تلقائية كل 15 دقيقة
-    app.job_queue.run_repeating(auto_alerts, interval=900, first=120)
+    # فحص تلقائي كل 10 دقائق
+    app.job_queue.run_repeating(auto_alerts, interval=600, first=60)
 
     print("✅ البوت يعمل الآن! اضغط Ctrl+C للإيقاف\n")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
