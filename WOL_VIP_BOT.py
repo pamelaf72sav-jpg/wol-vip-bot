@@ -12,7 +12,7 @@ from telegram.ext import (
     CallbackQueryHandler, filters, ContextTypes
 )
 
-BOT_TOKEN = "8605583250:AAG_J8RsVN0U8sLvP9xW-ht2TqW_IQTOUeY"
+BOT_TOKEN = "8701974784:AAECVuKO3ylnFUBcLl-TmHtjGbQxUF1rB-A"
 ADMIN_ID = 5909444412
 
 logging.basicConfig(level=logging.ERROR)
@@ -75,13 +75,11 @@ async def fetch_video_info(url: str):
 
 
 async def fast_download(video_url: str) -> str | None:
-    """تحميل بدون aiofiles — يستخدم write عادي"""
     tmp_path = None
     try:
         tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
         tmp_path = tmp.name
         tmp.close()
-
         async with aiohttp.ClientSession(headers=HEADERS) as session:
             async with session.get(
                 video_url,
@@ -92,7 +90,6 @@ async def fast_download(video_url: str) -> str | None:
                 with open(tmp_path, "wb") as f:
                     async for chunk in resp.content.iter_chunked(512 * 1024):
                         f.write(chunk)
-
         if os.path.getsize(tmp_path) < 5000:
             os.remove(tmp_path)
             return None
