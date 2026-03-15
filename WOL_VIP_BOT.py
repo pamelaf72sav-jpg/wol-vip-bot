@@ -6,7 +6,7 @@ import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
 
-BOT_TOKEN = "8701974784:AAECVuKO3ylnFUBcLl-TmHtjGbQxUF1rB-A"
+BOT_TOKEN = "8781378692:AAFeeRwOVk50JDcra4aZhmaHzaH_vbRXr7M"
 ADMIN_ID = 5909444412
 
 bot = telebot.TeleBot(BOT_TOKEN)
