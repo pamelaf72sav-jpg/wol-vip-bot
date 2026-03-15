@@ -33,7 +33,7 @@ from bs4 import BeautifulSoup
 # ══════════════════════════════════════════════
 #              إعدادات البوت
 # ══════════════════════════════════════════════
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8528463202:AAFGu6IHRYuopmY072ylIz0r1UN5kQAQ_II")
 DEVELOPER = "عباس الشافعي"
 DEVELOPER_TG = "@c4scc"
 BOT_VERSION = "2.0.0"
