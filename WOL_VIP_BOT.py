@@ -39,7 +39,6 @@ WELCOME = """
 ⚡️ بدون علامة مائية
 🎥 جودة فول HD تلقائياً
 🚀 سرعة تحميل فائقة
-⚡️ مجاناً 100%
 ━━━━━━━━━━━━━━━━━━━━━━━
 📌 فقط أرسل رابط الفيديو
 """
@@ -49,8 +48,7 @@ stats = {"downloads": 0, "users": set()}
 
 async def resolve_short_url(url: str) -> str:
     try:
-        connector = aiohttp.TCPConnector(ssl=False)
-        async with aiohttp.ClientSession(connector=connector) as session:
+        async with aiohttp.ClientSession() as session:
             async with session.get(
                 url, allow_redirects=True,
                 timeout=aiohttp.ClientTimeout(total=10),
@@ -68,9 +66,7 @@ async def fetch_video_info(url: str):
             f"https://www.tikwm.com/api/?url={url}",
         ]:
             try:
-                async with session.get(
-                    api, timeout=aiohttp.ClientTimeout(total=20)
-                ) as resp:
+                async with session.get(api, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                     data = await resp.json(content_type=None)
                     if data.get("code") == 0:
                         return data.get("data")
@@ -80,36 +76,20 @@ async def fetch_video_info(url: str):
 
 
 async def fast_download(video_url: str) -> str | None:
-    """تحميل سريع بـ chunks كبيرة ومتوازية"""
     try:
         tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
         tmp_path = tmp.name
         tmp.close()
-
-        connector = aiohttp.TCPConnector(
-            limit=10,
-            ssl=False,
-            ttl_dns_cache=300,
-            use_dns_cache=True,
-        )
-        timeout = aiohttp.ClientTimeout(
-            total=180,
-            connect=10,
-            sock_read=60,
-        )
-
-        async with aiohttp.ClientSession(
-            connector=connector,
-            headers=HEADERS
-        ) as session:
-            async with session.get(video_url, timeout=timeout) as resp:
+        async with aiohttp.ClientSession(headers=HEADERS) as session:
+            async with session.get(
+                video_url,
+                timeout=aiohttp.ClientTimeout(total=180)
+            ) as resp:
                 if resp.status != 200:
                     return None
                 async with aiofiles.open(tmp_path, "wb") as f:
-                    # chunk كبير = تحميل أسرع
                     async for chunk in resp.content.iter_chunked(512 * 1024):
                         await f.write(chunk)
-
         if os.path.getsize(tmp_path) < 5000:
             os.remove(tmp_path)
             return None
@@ -124,8 +104,6 @@ async def fast_download(video_url: str) -> str | None:
 
 
 def pick_best_url(info: dict) -> tuple:
-    """اختار أفضل رابط - play أسرع من hdplay"""
-    # play أسرع وجودته كافية، hdplay احتياطي
     if info.get("play"):
         return info["play"], "🎥 HD عالية الجودة"
     if info.get("hdplay"):
@@ -148,7 +126,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-
     back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data="back")]])
 
     if q.data == "how":
@@ -223,7 +200,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔗 جاري معالجة الرابط..."
     )
 
-    # تحويل الرابط المختصر
     if "vt.tiktok.com" in url or "vm.tiktok.com" in url:
         url = await resolve_short_url(url)
 
@@ -257,7 +233,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "╔══════════════════════════╗\n"
         "🤖  WOL AI ENHANCER  👑\n"
         "╚══════════════════════════╝\n\n"
-        f"🚀 جاري التحميل بسرعة فائقة...\n"
+        f"🚀 جاري التحميل...\n"
         f"🎯 الجودة: {quality_label}"
     )
 
@@ -294,8 +270,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 video=vf,
                 caption=caption,
                 supports_streaming=True,
-                read_timeout=180,
-                write_timeout=180,
             )
         stats["downloads"] += 1
         await msg.delete()
