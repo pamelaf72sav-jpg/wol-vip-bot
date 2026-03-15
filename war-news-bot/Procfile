@@ -1,1 +1,1 @@
-worker: python bot.py
+worker: python war-news-bot/bot.py
