@@ -27,7 +27,7 @@ from telegram.constants import ParseMode
 # ═══════════════════════════════════════
 #           ⚙️ الإعدادات الأساسية
 # ═══════════════════════════════════════
-BOT_TOKEN = "8528463202:AAFGu6IHRYuopmY072ylIz0r1UN5kQAQ_II"
+BOT_TOKEN = "8781378692:AAFeeRwOVk50JDcra4aZhmaHzaH_vbRXr7M"
 ANTHROPIC_API_KEY = ""  # ← ضع مفتاح Anthropic هنا
 ADMIN_CHAT_ID = 5909444412
 
