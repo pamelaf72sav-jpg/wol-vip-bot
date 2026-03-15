@@ -1,1282 +1,771 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🔥 WAR NEWS BOT - بوت أخبار الحرب
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-تم التطوير بواسطة: عباس الشافعي
-تيليغرام: @c4scc
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+╔══════════════════════════════════════════════════════╗
+║     🔴 بوت أخبار الحرب - تطوير: عباس الشافعي 🔴     ║
+║         نظام ذكاء اصطناعي للتحقق من الأخبار          ║
+╚══════════════════════════════════════════════════════╝
 """
 
 import asyncio
 import logging
-import os
-import json
-import random
-import hashlib
 import feedparser
-import aiohttp
-import time
+import requests
+import json
+import re
+import html
 from datetime import datetime
 from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup,
-    BotCommand, InputMediaPhoto
+    Update, InlineKeyboardButton, InlineKeyboardMarkup
 )
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
-    ContextTypes, MessageHandler, filters, JobQueue
+    ContextTypes
 )
 from telegram.constants import ParseMode
-from deep_translator import GoogleTranslator
-from bs4 import BeautifulSoup
 
-# ══════════════════════════════════════════════
-#              إعدادات البوت
-# ══════════════════════════════════════════════
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8528463202:AAFGu6IHRYuopmY072ylIz0r1UN5kQAQ_II")
-DEVELOPER = "عباس الشافعي"
-DEVELOPER_TG = "@c4scc"
-BOT_VERSION = "2.0.0"
+# ═══════════════════════════════════════
+#           ⚙️ الإعدادات الأساسية
+# ═══════════════════════════════════════
+BOT_TOKEN = "8528463202:AAFGu6IHRYuopmY072ylIz0r1UN5kQAQ_II"
+ANTHROPIC_API_KEY = ""  # ← ضع مفتاح Anthropic هنا
+ADMIN_CHAT_ID = 5909444412
+
+# ═══════════════════════════════════════
+#        📡 مصادر الأخبار الموثوقة
+# ═══════════════════════════════════════
+NEWS_SOURCES = {
+    "🌍 رويترز عربي": {
+        "url": "https://feeds.reuters.com/reuters/arabicTopNews",
+        "lang": "ar", "trust": 95, "flag": "🇬🇧"
+    },
+    "📺 الجزيرة": {
+        "url": "https://www.aljazeera.net/xml/rss/all.xml",
+        "lang": "ar", "trust": 88, "flag": "🇶🇦"
+    },
+    "📻 بي بي سي عربي": {
+        "url": "http://feeds.bbci.co.uk/arabic/rss.xml",
+        "lang": "ar", "trust": 93, "flag": "🇬🇧"
+    },
+    "📡 العربية": {
+        "url": "https://www.alarabiya.net/tools/rss/ar/العربية.xml",
+        "lang": "ar", "trust": 82, "flag": "🇸🇦"
+    },
+    "🌐 أسوشيتد برس": {
+        "url": "https://feeds.apnews.com/rss/apf-topnews",
+        "lang": "en", "trust": 94, "flag": "🇺🇸"
+    },
+    "📰 الغارديان": {
+        "url": "https://www.theguardian.com/world/iran/rss",
+        "lang": "en", "trust": 90, "flag": "🇬🇧"
+    },
+    "🗞️ فرانس 24 عربي": {
+        "url": "https://www.france24.com/ar/rss",
+        "lang": "ar", "trust": 87, "flag": "🇫🇷"
+    },
+    "📢 سكاي نيوز عربية": {
+        "url": "https://www.skynewsarabia.com/rss.xml",
+        "lang": "ar", "trust": 80, "flag": "🇦🇪"
+    },
+}
+
+# ═══════════════════════════════════════
+#       🔍 كلمات مفتاحية للحرب
+# ═══════════════════════════════════════
+WAR_KEYWORDS = [
+    "إيران", "أمريكا", "إسرائيل", "حرب", "هجوم", "ضربة",
+    "صاروخ", "طائرة مسيّرة", "عملية عسكرية", "توتر",
+    "تهديد", "مواجهة", "غارة", "انفجار", "اغتيال",
+    "نووي", "حرس الثوري", "حزب الله", "الحوثيين",
+    "البنتاغون", "تل أبيب", "طهران", "واشنطن",
+    "البحر الأحمر", "مضيق هرمز", "غزة", "لبنان",
+    "iran", "israel", "america", "usa", "war", "attack",
+    "strike", "missile", "drone", "military", "nuclear",
+    "irgc", "hezbollah", "houthi", "pentagon", "tehran",
+    "netanyahu", "khamenei", "trump", "red sea", "hormuz"
+]
+
+# ═══════════════════════════════════════
+#         📊 تخزين مؤقت للبيانات
+# ═══════════════════════════════════════
+news_cache = {}
+sent_news_ids = set()
+subscribed_users = set()
+breaking_subscribers = set()
+last_fetch_time = None
 
 logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    level=logging.INFO,
-    handlers=[
-        logging.FileHandler("bot.log", encoding="utf-8"),
-        logging.StreamHandler()
-    ]
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# ══════════════════════════════════════════════
-#              مصادر الأخبار الموثوقة
-# ══════════════════════════════════════════════
-NEWS_SOURCES = {
-    "arabic": {
-        "الجزيرة العربية": {
-            "rss": "https://www.aljazeera.net/aljazeerarss/a7c186be-1baa-4bd4-9d80-a84db769f779/8c42a6cd-7b18-4d63-bf51-f438ac4f6a95",
-            "trust": 95,
-            "icon": "🔵",
-            "lang": "ar"
-        },
-        "BBC عربي": {
-            "rss": "https://feeds.bbci.co.uk/arabic/rss.xml",
-            "trust": 97,
-            "icon": "🔴",
-            "lang": "ar"
-        },
-        "رويترز عربي": {
-            "rss": "https://feeds.reuters.com/reuters/MENnews",
-            "trust": 98,
-            "icon": "🟠",
-            "lang": "ar"
-        },
-        "العربية نت": {
-            "rss": "https://www.alarabiya.net/tools/rss",
-            "trust": 88,
-            "icon": "🟡",
-            "lang": "ar"
-        },
-        "سكاي نيوز عربية": {
-            "rss": "https://www.skynewsarabia.com/rss.xml",
-            "trust": 85,
-            "icon": "🔷",
-            "lang": "ar"
-        },
-        "RT عربي": {
-            "rss": "https://arabic.rt.com/rss/",
-            "trust": 70,
-            "icon": "⭕",
-            "lang": "ar"
-        },
-    },
-    "international": {
-        "Reuters": {
-            "rss": "https://feeds.reuters.com/reuters/topNews",
-            "trust": 98,
-            "icon": "🟠",
-            "lang": "en"
-        },
-        "AP News": {
-            "rss": "https://rsshub.app/apnews/topics/apf-topnews",
-            "trust": 97,
-            "icon": "🔵",
-            "lang": "en"
-        },
-        "BBC World": {
-            "rss": "http://feeds.bbci.co.uk/news/world/rss.xml",
-            "trust": 97,
-            "icon": "🔴",
-            "lang": "en"
-        },
-        "Al Jazeera English": {
-            "rss": "https://www.aljazeera.com/xml/rss/all.xml",
-            "trust": 92,
-            "icon": "🔵",
-            "lang": "en"
-        },
-        "The Guardian": {
-            "rss": "https://www.theguardian.com/world/rss",
-            "trust": 90,
-            "icon": "🟣",
-            "lang": "en"
-        },
-    }
-}
 
-# الكلمات المفتاحية للحرب
-WAR_KEYWORDS = {
-    "ar": [
-        "إيران", "أمريكا", "إسرائيل", "حرب", "هجوم", "ضربة", "صواريخ",
-        "غارة", "قتلى", "انفجار", "عسكري", "قوات", "طائرات", "دفاع",
-        "تهديد", "توتر", "مواجهة", "تصعيد", "جبهة", "ميليشيا",
-        "نووي", "مفاوضات", "عقوبات", "حزب الله", "الحوثيين", "غزة",
-        "الضفة", "لبنان", "سوريا", "العراق", "اليمن", "بحر عمان"
-    ],
-    "en": [
-        "iran", "america", "israel", "war", "attack", "strike", "missiles",
-        "airstrike", "casualties", "explosion", "military", "forces",
-        "aircraft", "defense", "threat", "tension", "confrontation",
-        "escalation", "nuclear", "sanctions", "hezbollah", "houthi",
-        "gaza", "lebanon", "syria", "iraq", "yemen"
-    ]
-}
-
-# ══════════════════════════════════════════════
-#              قاعدة البيانات المحلية
-# ══════════════════════════════════════════════
-class NewsDatabase:
-    def __init__(self):
-        self.db_file = "news_db.json"
-        self.users_file = "users_db.json"
-        self.load()
-
-    def load(self):
-        try:
-            with open(self.db_file, "r", encoding="utf-8") as f:
-                self.news = json.load(f)
-        except:
-            self.news = {}
-        try:
-            with open(self.users_file, "r", encoding="utf-8") as f:
-                self.users = json.load(f)
-        except:
-            self.users = {}
-
-    def save(self):
-        with open(self.db_file, "w", encoding="utf-8") as f:
-            json.dump(self.news, f, ensure_ascii=False, indent=2)
-        with open(self.users_file, "w", encoding="utf-8") as f:
-            json.dump(self.users, f, ensure_ascii=False, indent=2)
-
-    def add_news(self, news_id, data):
-        self.news[news_id] = data
-        if len(self.news) > 500:
-            oldest = sorted(self.news.keys())[:100]
-            for k in oldest:
-                del self.news[k]
-        self.save()
-
-    def news_exists(self, news_id):
-        return news_id in self.news
-
-    def add_user(self, user_id, data):
-        uid = str(user_id)
-        if uid not in self.users:
-            self.users[uid] = data
-            self.save()
-        return self.users[uid]
-
-    def get_user(self, user_id):
-        return self.users.get(str(user_id), None)
-
-    def update_user(self, user_id, key, value):
-        uid = str(user_id)
-        if uid in self.users:
-            self.users[uid][key] = value
-            self.save()
-
-    def get_all_users(self):
-        return self.users
-
-    def get_stats(self):
-        total_users = len(self.users)
-        active_users = sum(1 for u in self.users.values() if u.get("alerts", True))
-        arabic_users = sum(1 for u in self.users.values() if u.get("lang", "ar") == "ar")
-        english_users = total_users - arabic_users
-        return {
-            "total": total_users,
-            "active": active_users,
-            "arabic": arabic_users,
-            "english": english_users,
-            "news_count": len(self.news)
-        }
-
-db = NewsDatabase()
-
-# ══════════════════════════════════════════════
-#              نظام التحقق من الأخبار
-# ══════════════════════════════════════════════
-class NewsVerifier:
-    
-    VERIFICATION_LEVELS = {
-        "confirmed": {
-            "ar": "✅ مؤكد",
-            "en": "✅ Confirmed",
-            "color": "🟢",
-            "score_min": 85
-        },
-        "likely": {
-            "ar": "🔶 محتمل",
-            "en": "🔶 Likely True",
-            "color": "🟡",
-            "score_min": 65
-        },
-        "unverified": {
-            "ar": "⚠️ غير مؤكد",
-            "en": "⚠️ Unverified",
-            "color": "🟠",
-            "score_min": 45
-        },
-        "rumor": {
-            "ar": "❌ شائعة",
-            "en": "❌ Rumor",
-            "color": "🔴",
-            "score_min": 0
-        }
+# ═══════════════════════════════════════════════════════
+#                🤖 تحليل بالذكاء الاصطناعي
+# ═══════════════════════════════════════════════════════
+def analyze_with_ai(title: str, description: str, source: str) -> dict:
+    """تحليل الخبر باستخدام Claude API مباشرة"""
+    default = {
+        "verified": "قيد التحقق",
+        "importance": "متوسط",
+        "summary_ar": (description[:200] if description else title),
+        "alert_level": "🟡",
+        "tags": [],
+        "countries": [],
+        "threat_level": "متوسط"
     }
 
-    @staticmethod
-    def verify_news(source_name: str, trust_score: int, title: str, 
-                    cross_sources: int = 1) -> dict:
-        """تحليل ودرجة التحقق من الخبر"""
-        
-        score = trust_score
-        
-        # تعزيز النقاط بناءً على عدد المصادر المتقاطعة
-        if cross_sources >= 3:
-            score = min(100, score + 15)
-        elif cross_sources == 2:
-            score = min(100, score + 8)
-        
-        # تحليل الكلمات في العنوان
-        doubt_words_ar = ["مصادر", "يُقال", "يُزعم", "مجهول", "غير رسمي", "ادعاء"]
-        doubt_words_en = ["sources say", "allegedly", "claimed", "unconfirmed", "reportedly"]
-        confirm_words_ar = ["رسمي", "أعلن", "أكد", "بيان", "وزارة", "رئيس"]
-        confirm_words_en = ["official", "confirmed", "announced", "statement", "minister"]
-        
-        title_lower = title.lower()
-        for w in doubt_words_ar + doubt_words_en:
-            if w in title_lower:
-                score -= 15
-                break
-        for w in confirm_words_ar + confirm_words_en:
-            if w in title_lower:
-                score += 10
-                break
-        
-        score = max(0, min(100, score))
-        
-        # تحديد مستوى التحقق
-        if score >= 85:
-            level = "confirmed"
-        elif score >= 65:
-            level = "likely"
-        elif score >= 45:
-            level = "unverified"
-        else:
-            level = "rumor"
-        
-        return {
-            "score": score,
-            "level": level,
-            "labels": NewsVerifier.VERIFICATION_LEVELS[level]
-        }
+    if ANTHROPIC_API_KEY == "YOUR_ANTHROPIC_API_KEY_HERE":
+        return default
 
-    @staticmethod
-    def get_trust_bar(score: int) -> str:
-        """شريط درجة الموثوقية"""
-        filled = int(score / 10)
-        empty = 10 - filled
-        bar = "█" * filled + "░" * empty
-        return f"[{bar}] {score}%"
+    try:
+        prompt = f"""أنت محلل أخبار عسكرية وسياسية محترف.
+حلل هذا الخبر وأعد JSON فقط بدون أي نص إضافي:
 
-verifier = NewsVerifier()
+العنوان: {title}
+المصدر: {source}
+المحتوى: {description[:400] if description else ''}
 
-# ══════════════════════════════════════════════
-#              جالب الأخبار
-# ══════════════════════════════════════════════
-class NewsFetcher:
+أعد هذا JSON بالضبط:
+{{
+  "verified": "مؤكد" أو "غير مؤكد" أو "قيد التحقق",
+  "importance": "عاجل" أو "مهم" أو "متوسط" أو "عادي",
+  "summary_ar": "ملخص بالعربية جملة واحدة",
+  "alert_level": "🔴" أو "🟠" أو "🟡" أو "🟢",
+  "tags": ["وسم1", "وسم2"],
+  "countries": ["دولة1", "دولة2"],
+  "threat_level": "عالي" أو "متوسط" أو "منخفض"
+}}"""
 
-    @staticmethod
-    def is_war_related(title: str, summary: str = "") -> bool:
-        text = (title + " " + summary).lower()
-        for kw in WAR_KEYWORDS["ar"] + WAR_KEYWORDS["en"]:
-            if kw.lower() in text:
-                return True
-        return False
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            },
+            json={
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 400,
+                "messages": [{"role": "user", "content": prompt}]
+            },
+            timeout=15
+        )
 
-    @staticmethod
-    def generate_id(title: str, source: str) -> str:
-        return hashlib.md5(f"{title}{source}".encode()).hexdigest()[:12]
+        if response.status_code == 200:
+            data = response.json()
+            text = data["content"][0]["text"].strip()
+            # تنظيف JSON
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+            return json.loads(text)
 
-    @staticmethod
-    async def fetch_feed(source_name: str, source_data: dict) -> list:
-        """جلب أخبار من مصدر RSS"""
-        news_list = []
+    except Exception as e:
+        logger.error(f"AI Error: {e}")
+
+    return default
+
+
+# ═══════════════════════════════════════════════════════
+#              📡 جلب الأخبار من المصادر
+# ═══════════════════════════════════════════════════════
+def fetch_all_news() -> list:
+    """جلب الأخبار من جميع المصادر"""
+    global news_cache, last_fetch_time
+    all_news = []
+
+    for source_name, source_info in NEWS_SOURCES.items():
         try:
-            feed = feedparser.parse(source_data["rss"])
-            for entry in feed.entries[:10]:
-                title = entry.get("title", "")
-                summary = entry.get("summary", "")
-                link = entry.get("link", "")
-                
-                if not NewsFetcher.is_war_related(title, summary):
+            headers = {'User-Agent': 'Mozilla/5.0 NewsBot/2.0'}
+            feed = feedparser.parse(source_info["url"], request_headers=headers)
+
+            for entry in feed.entries[:8]:
+                title = entry.get('title', '')
+                desc = re.sub(r'<[^>]+>', '', entry.get('summary', entry.get('description', '')))
+                link = entry.get('link', '')
+
+                # فحص ارتباط الخبر بالحرب
+                text_check = (title + " " + desc).lower()
+                if not any(kw.lower() in text_check for kw in WAR_KEYWORDS):
                     continue
-                
-                # تنظيف HTML من الملخص
-                if summary:
-                    soup = BeautifulSoup(summary, "html.parser")
-                    summary = soup.get_text()[:300]
-                
-                news_id = NewsFetcher.generate_id(title, source_name)
-                
-                if not db.news_exists(news_id):
-                    verification = verifier.verify_news(
-                        source_name, 
-                        source_data["trust"],
-                        title
-                    )
-                    news_item = {
-                        "id": news_id,
-                        "title": title,
-                        "summary": summary,
-                        "link": link,
-                        "source": source_name,
-                        "trust": source_data["trust"],
-                        "icon": source_data["icon"],
-                        "lang": source_data["lang"],
-                        "verification": verification,
-                        "timestamp": datetime.now().isoformat(),
-                        "is_breaking": source_data["trust"] >= 90 and verification["level"] == "confirmed"
-                    }
-                    news_list.append(news_item)
-                    db.add_news(news_id, news_item)
+
+                # استخراج صورة
+                image_url = None
+                if hasattr(entry, 'media_content') and entry.media_content:
+                    image_url = entry.media_content[0].get('url')
+                elif hasattr(entry, 'enclosures') and entry.enclosures:
+                    for enc in entry.enclosures:
+                        if 'image' in enc.get('type', ''):
+                            image_url = enc.get('href', enc.get('url'))
+                            break
+
+                news_item = {
+                    "id": hash(title[:40] + link[:20]),
+                    "title": title,
+                    "description": desc[:500],
+                    "link": link,
+                    "source": source_name,
+                    "flag": source_info["flag"],
+                    "trust": source_info["trust"],
+                    "image_url": image_url,
+                    "time": datetime.now().strftime('%H:%M')
+                }
+                all_news.append(news_item)
+
         except Exception as e:
             logger.error(f"Error fetching {source_name}: {e}")
-        return news_list
 
-    @staticmethod
-    async def fetch_all_news() -> list:
-        """جلب جميع الأخبار من كل المصادر"""
-        all_news = []
-        all_sources = {**NEWS_SOURCES["arabic"], **NEWS_SOURCES["international"]}
-        
-        tasks = []
-        for name, data in all_sources.items():
-            tasks.append(NewsFetcher.fetch_feed(name, data))
-        
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for result in results:
-            if isinstance(result, list):
-                all_news.extend(result)
-        
-        return all_news
+    # إزالة المكرر
+    unique_news = []
+    seen = set()
+    for item in all_news:
+        key = item['title'][:40].lower()
+        if key not in seen:
+            seen.add(key)
+            unique_news.append(item)
 
-fetcher = NewsFetcher()
+    news_cache = {item['id']: item for item in unique_news}
+    last_fetch_time = datetime.now()
+    return unique_news
 
-# ══════════════════════════════════════════════
-#              تنسيق الرسائل
-# ══════════════════════════════════════════════
-class MessageFormatter:
 
-    @staticmethod
-    def format_news_ar(news: dict, index: int = None) -> str:
-        v = news["verification"]
-        trust_bar = verifier.get_trust_bar(news["trust"])
-        
-        breaking_tag = ""
-        if news.get("is_breaking"):
-            breaking_tag = "🚨 *عاجل - خبر مؤكد الآن* 🚨\n━━━━━━━━━━━━━━━━━━━━\n"
-        
-        num = f"[{index}] " if index else ""
-        
-        msg = f"""
-{breaking_tag}{num}{news['icon']} *{news['title']}*
+# ═══════════════════════════════════════════════════════
+#              🎨 تنسيق رسائل الأخبار
+# ═══════════════════════════════════════════════════════
+def format_news(item: dict, ai: dict) -> str:
+    """تنسيق الخبر بشكل احترافي"""
+    alert = ai.get('alert_level', '🟡')
+    importance = ai.get('importance', 'متوسط')
+    verified = ai.get('verified', 'قيد التحقق')
+    threat = ai.get('threat_level', 'متوسط')
+    summary = ai.get('summary_ar', item.get('description', '')[:200])
+    tags = " ".join(["#" + t.replace(' ', '_') for t in ai.get('tags', [])[:4]])
+    countries = " | ".join(ai.get('countries', [])[:3])
 
-📋 {news.get('summary', 'لا يوجد ملخص')[:250]}...
+    verify_map = {
+        "مؤكد": "✅ مؤكد",
+        "غير مؤكد": "❌ غير مؤكد",
+        "قيد التحقق": "🔄 قيد التحقق"
+    }
+    importance_map = {
+        "عاجل": "🚨 عاجل جداً",
+        "مهم": "⚠️ مهم",
+        "متوسط": "📌 متوسط",
+        "عادي": "📋 عادي"
+    }
+    threat_map = {
+        "عالي": "🔴 عالي",
+        "متوسط": "🟡 متوسط",
+        "منخفض": "🟢 منخفض"
+    }
 
-🗂️ *المصدر:* {news['source']}
-⏰ *التوقيت:* {datetime.fromisoformat(news['timestamp']).strftime('%Y-%m-%d %H:%M')}
-📊 *الموثوقية:* {trust_bar}
-{v['labels']['color']} *حالة التحقق:* {v['labels']['ar']} (درجة: {v['score']}/100)
+    trust = item.get('trust', 0)
+    trust_bar = "█" * (trust // 10) + "░" * (10 - trust // 10)
 
-🔗 [اقرأ الخبر الكامل]({news['link']})
+    title_safe = html.escape(item.get('title', ''))
+    summary_safe = html.escape(str(summary)[:250])
 
-━━━━━━━━━━━━━━━━━━━━
-🛠 تطوير: {DEVELOPER} | {DEVELOPER_TG}
-"""
-        return msg.strip()
+    msg = f"""{alert}{alert}{alert} <b>━━━━━━━━━━━━━━━━━━━━━━</b>
 
-    @staticmethod
-    def format_news_en(news: dict, index: int = None) -> str:
-        v = news["verification"]
-        trust_bar = verifier.get_trust_bar(news["trust"])
-        
-        breaking_tag = ""
-        if news.get("is_breaking"):
-            breaking_tag = "🚨 *BREAKING NEWS - CONFIRMED* 🚨\n━━━━━━━━━━━━━━━━━━━━\n"
-        
-        num = f"[{index}] " if index else ""
-        
-        msg = f"""
-{breaking_tag}{num}{news['icon']} *{news['title']}*
+📰 <b>{title_safe}</b>
 
-📋 {news.get('summary', 'No summary available')[:250]}...
+<b>━━━━━━━━━━━━━━━━━━━━━━</b>
+{verify_map.get(verified, '🔄 قيد التحقق')}
+{importance_map.get(importance, '📌 متوسط')}
+💢 مستوى التهديد: {threat_map.get(threat, '🟡 متوسط')}
 
-🗂️ *Source:* {news['source']}
-⏰ *Time:* {datetime.fromisoformat(news['timestamp']).strftime('%Y-%m-%d %H:%M')}
-📊 *Trust Score:* {trust_bar}
-{v['labels']['color']} *Verification:* {v['labels']['en']} ({v['score']}/100)
+🤖 <b>تحليل AI:</b>
+<i>{summary_safe}</i>
 
-🔗 [Read Full Story]({news['link']})
+{('🌍 <b>الدول:</b> ' + html.escape(countries)) if countries else ''}
+{tags}
 
-━━━━━━━━━━━━━━━━━━━━
-🛠 Dev: {DEVELOPER} | {DEVELOPER_TG}
-"""
-        return msg.strip()
+<b>━━━━━━━━━━━━━━━━━━━━━━</b>
+{item.get('flag', '🌍')} <b>المصدر:</b> {html.escape(item.get('source', ''))}
+📊 <b>الموثوقية:</b> {trust}% <code>[{trust_bar}]</code>
+🕐 <b>الوقت:</b> {item.get('time', '')}
 
-    @staticmethod
-    def get_main_menu_ar() -> InlineKeyboardMarkup:
-        buttons = [
-            [
-                InlineKeyboardButton("📰 أحدث الأخبار", callback_data="latest_news"),
-                InlineKeyboardButton("🚨 الأخبار العاجلة", callback_data="breaking_news"),
-            ],
-            [
-                InlineKeyboardButton("🇮🇷 أخبار إيران", callback_data="iran_news"),
-                InlineKeyboardButton("🇮🇱 أخبار إسرائيل", callback_data="israel_news"),
-            ],
-            [
-                InlineKeyboardButton("🇺🇸 أخبار أمريكا", callback_data="usa_news"),
-                InlineKeyboardButton("🌍 أخبار عالمية", callback_data="world_news"),
-            ],
-            [
-                InlineKeyboardButton("✅ أخبار مؤكدة", callback_data="confirmed_news"),
-                InlineKeyboardButton("⚠️ أخبار غير مؤكدة", callback_data="unverified_news"),
-            ],
-            [
-                InlineKeyboardButton("🔔 تفعيل/إيقاف التنبيهات", callback_data="toggle_alerts"),
-                InlineKeyboardButton("🌐 تغيير اللغة", callback_data="change_lang"),
-            ],
-            [
-                InlineKeyboardButton("📊 إحصائيات البوت", callback_data="stats"),
-                InlineKeyboardButton("ℹ️ عن البوت", callback_data="about"),
-            ],
-            [
-                InlineKeyboardButton("🔍 تحقق من خبر", callback_data="fact_check"),
-                InlineKeyboardButton("📡 المصادر الموثوقة", callback_data="sources"),
-            ],
+{('<a href="' + item['link'] + '">🔗 اقرأ الخبر كاملاً</a>') if item.get('link') else ''}
+
+<b>━━━━━━━━━━━━━━━━━━━━━━</b>
+⚡ <i>تطوير: عباس الشافعي</i> | 🤖 <i>Claude AI</i>"""
+
+    return msg
+
+
+# ═══════════════════════════════════════════════════════
+#              ⌨️ لوحات المفاتيح
+# ═══════════════════════════════════════════════════════
+def main_keyboard():
+    kb = [
+        [
+            InlineKeyboardButton("📰 آخر الأخبار", callback_data="latest"),
+            InlineKeyboardButton("🚨 الأخبار العاجلة", callback_data="breaking")
+        ],
+        [
+            InlineKeyboardButton("🇮🇷 إيران", callback_data="iran"),
+            InlineKeyboardButton("🇺🇸 أمريكا", callback_data="usa"),
+            InlineKeyboardButton("🇮🇱 إسرائيل", callback_data="israel")
+        ],
+        [
+            InlineKeyboardButton("💥 عمليات عسكرية", callback_data="military"),
+            InlineKeyboardButton("☢️ الملف النووي", callback_data="nuclear")
+        ],
+        [
+            InlineKeyboardButton("✅ أخبار مؤكدة", callback_data="verified"),
+            InlineKeyboardButton("❓ غير مؤكدة", callback_data="unverified")
+        ],
+        [
+            InlineKeyboardButton("🔔 تفعيل التنبيهات", callback_data="sub"),
+            InlineKeyboardButton("🔕 إيقاف التنبيهات", callback_data="unsub")
+        ],
+        [
+            InlineKeyboardButton("📡 المصادر", callback_data="sources"),
+            InlineKeyboardButton("📊 إحصائيات", callback_data="stats")
+        ],
+        [
+            InlineKeyboardButton("ℹ️ عن البوت", callback_data="about"),
+            InlineKeyboardButton("❓ المساعدة", callback_data="help_menu")
         ]
-        return InlineKeyboardMarkup(buttons)
+    ]
+    return InlineKeyboardMarkup(kb)
 
-    @staticmethod
-    def get_main_menu_en() -> InlineKeyboardMarkup:
-        buttons = [
-            [
-                InlineKeyboardButton("📰 Latest News", callback_data="latest_news"),
-                InlineKeyboardButton("🚨 Breaking News", callback_data="breaking_news"),
-            ],
-            [
-                InlineKeyboardButton("🇮🇷 Iran News", callback_data="iran_news"),
-                InlineKeyboardButton("🇮🇱 Israel News", callback_data="israel_news"),
-            ],
-            [
-                InlineKeyboardButton("🇺🇸 USA News", callback_data="usa_news"),
-                InlineKeyboardButton("🌍 World News", callback_data="world_news"),
-            ],
-            [
-                InlineKeyboardButton("✅ Confirmed News", callback_data="confirmed_news"),
-                InlineKeyboardButton("⚠️ Unverified News", callback_data="unverified_news"),
-            ],
-            [
-                InlineKeyboardButton("🔔 Toggle Alerts", callback_data="toggle_alerts"),
-                InlineKeyboardButton("🌐 Change Language", callback_data="change_lang"),
-            ],
-            [
-                InlineKeyboardButton("📊 Bot Stats", callback_data="stats"),
-                InlineKeyboardButton("ℹ️ About Bot", callback_data="about"),
-            ],
-            [
-                InlineKeyboardButton("🔍 Fact Check", callback_data="fact_check"),
-                InlineKeyboardButton("📡 Trusted Sources", callback_data="sources"),
-            ],
-        ]
-        return InlineKeyboardMarkup(buttons)
 
-formatter = MessageFormatter()
+def news_keyboard(news_id: int):
+    kb = [
+        [
+            InlineKeyboardButton("🤖 تحليل AI", callback_data=f"ai_{news_id}"),
+            InlineKeyboardButton("🔄 تحديث", callback_data="latest")
+        ],
+        [InlineKeyboardButton("🏠 القائمة الرئيسية", callback_data="home")]
+    ]
+    return InlineKeyboardMarkup(kb)
 
-# ══════════════════════════════════════════════
-#              أوامر البوت
-# ══════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════
+#                  📱 أوامر البوت
+# ═══════════════════════════════════════════════════════
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    uid = user.id
-    
-    existing = db.get_user(uid)
-    if not existing:
-        db.add_user(uid, {
-            "id": uid,
-            "name": user.full_name,
-            "username": user.username or "",
-            "lang": "ar",
-            "alerts": True,
-            "joined": datetime.now().isoformat(),
-            "news_count": 0
-        })
-    
-    user_data = db.get_user(uid)
-    lang = user_data.get("lang", "ar") if user_data else "ar"
-    
-    if lang == "ar":
-        welcome = f"""
-🔥 *مرحباً بك في بوت أخبار الحرب* 🔥
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-مرحباً *{user.first_name}* 👋
+    chat_id = update.effective_chat.id
+    subscribed_users.add(chat_id)
 
-🌐 أنت الآن متصل بأقوى بوت لمتابعة:
-• أخبار الحرب بين 🇺🇸 أمريكا و🇮🇷 إيران و🇮🇱 إسرائيل
-• تحقق فوري من صحة الأخبار ✅❌
-• مصادر عالمية موثوقة بنسبة 95-98%
-• تنبيهات عاجلة فورية 🚨
-• أخبار بالعربية والإنجليزية 🌍
+    msg = f"""🔴🔴🔴 <b>بوت أخبار الحرب</b> 🔴🔴🔴
+{'═' * 32}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🛠 *تم التطوير على يد:* {DEVELOPER}
-📱 *تيليغرام المطور:* {DEVELOPER_TG}
-📌 *الإصدار:* v{BOT_VERSION}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+مرحباً <b>{html.escape(user.first_name)}</b> 👋
 
-اختر من القائمة أدناه 👇
-"""
-        menu = formatter.get_main_menu_ar()
-    else:
-        welcome = f"""
-🔥 *Welcome to War News Bot* 🔥
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Hello *{user.first_name}* 👋
+🤖 <b>النظام الإخباري الذكي</b>
+تغطية شاملة لأخبار الحرب بين:
+🇺🇸 أمريكا | 🇮🇷 إيران | 🇮🇱 إسرائيل
 
-🌐 Connected to the most powerful war news bot:
-• 🇺🇸 USA • 🇮🇷 Iran • 🇮🇱 Israel conflicts
-• Instant fact-checking ✅❌
-• 95-98% trusted global sources
-• Instant breaking alerts 🚨
-• Arabic & English news 🌍
+{'━' * 30}
+📡 <b>المصادر:</b> رويترز، الجزيرة، BBC، العربية، AP، فرانس 24، سكاي نيوز وأكثر
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🛠 *Developed by:* {DEVELOPER}
-📱 *Developer TG:* {DEVELOPER_TG}
-📌 *Version:* v{BOT_VERSION}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🤖 <b>مميزات AI:</b>
+• ✅ التحقق من صحة الأخبار
+• 📊 تحليل مستوى التهديد
+• 🚨 تنبيهات فورية للعاجل
+• 🌍 تغطية عربية وعالمية
 
-Choose from the menu below 👇
-"""
-        menu = formatter.get_main_menu_en()
-    
-    await update.message.reply_text(
-        welcome.strip(),
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=menu,
-        disable_web_page_preview=True
-    )
+{'═' * 32}
+👨‍💻 <b>تطوير:</b> عباس الشافعي
+🤖 <b>مدعوم بـ:</b> Claude AI
+{'═' * 32}
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_data = db.get_user(update.effective_user.id)
-    lang = user_data.get("lang", "ar") if user_data else "ar"
-    
-    if lang == "ar":
-        text = """
-📖 *دليل استخدام البوت*
-━━━━━━━━━━━━━━━━━━━━━━
-🔹 /start - القائمة الرئيسية
-🔹 /news - أحدث الأخبار
-🔹 /breaking - الأخبار العاجلة
-🔹 /iran - أخبار إيران
-🔹 /israel - أخبار إسرائيل
-🔹 /usa - أخبار أمريكا
-🔹 /confirmed - الأخبار المؤكدة فقط
-🔹 /sources - قائمة المصادر الموثوقة
-🔹 /alert - تفعيل/إيقاف التنبيهات
-🔹 /lang - تغيير اللغة
-🔹 /stats - إحصائيات البوت
-🔹 /check [نص] - تحقق من خبر
-🔹 /about - معلومات عن البوت
+اختر من القائمة 👇"""
 
-🔵 نظام التحقق:
-✅ مؤكد (85-100%)
-🔶 محتمل (65-84%)
-⚠️ غير مؤكد (45-64%)
-❌ شائعة (0-44%)
-"""
-    else:
-        text = """
-📖 *Bot Usage Guide*
-━━━━━━━━━━━━━━━━━━━━━━
-🔹 /start - Main menu
-🔹 /news - Latest news
-🔹 /breaking - Breaking news
-🔹 /iran - Iran news
-🔹 /israel - Israel news
-🔹 /usa - USA news
-🔹 /confirmed - Confirmed news only
-🔹 /sources - Trusted sources list
-🔹 /alert - Toggle alerts
-🔹 /lang - Change language
-🔹 /stats - Bot statistics
-🔹 /check [text] - Fact check news
-🔹 /about - Bot information
+    await update.message.reply_html(msg, reply_markup=main_keyboard())
 
-🔵 Verification System:
-✅ Confirmed (85-100%)
-🔶 Likely (65-84%)
-⚠️ Unverified (45-64%)
-❌ Rumor (0-44%)
-"""
-    
-    await update.message.reply_text(
-        text.strip(),
-        parse_mode=ParseMode.MARKDOWN
-    )
 
-async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_data = db.get_user(update.effective_user.id)
-    lang = user_data.get("lang", "ar") if user_data else "ar"
-    
-    wait_msg = await update.message.reply_text(
-        "⏳ جاري جلب أحدث الأخبار..." if lang == "ar" else "⏳ Fetching latest news..."
-    )
-    
-    news_list = await fetcher.fetch_all_news()
-    
-    if not news_list:
-        news_items = list(db.news.values())
-        news_list = sorted(news_items, key=lambda x: x.get("timestamp", ""), reverse=True)[:5]
-    
-    await wait_msg.delete()
-    
-    if not news_list:
-        msg = "لا توجد أخبار متاحة حالياً." if lang == "ar" else "No news available at the moment."
-        await update.message.reply_text(msg)
-        return
-    
-    for i, news in enumerate(news_list[:5], 1):
-        try:
-            if lang == "ar":
-                msg = formatter.format_news_ar(news, i)
-            else:
-                if news.get("lang") == "ar":
-                    try:
-                        translated = GoogleTranslator(source="ar", target="en").translate(news["title"])
-                        news["title"] = translated
-                    except:
-                        pass
-                msg = formatter.format_news_en(news, i)
-            
-            buttons = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("🔍 تحقق أكثر" if lang == "ar" else "🔍 More Info", 
-                                        callback_data=f"verify_{news['id']}"),
-                    InlineKeyboardButton("📤 مشاركة" if lang == "ar" else "📤 Share", 
-                                        callback_data=f"share_{news['id']}"),
-                ]
-            ])
-            
-            await update.message.reply_text(
-                msg,
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=buttons,
-                disable_web_page_preview=False
-            )
+async def cmd_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("⏳ جاري جلب الأخبار...")
+    await send_news_list(update.message.reply_html, [])
+
+
+async def cmd_breaking(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔍 جاري البحث عن أخبار عاجلة...")
+    news = fetch_all_news()
+    found = False
+    for item in news[:15]:
+        ai = analyze_with_ai(item['title'], item['description'], item['source'])
+        if ai.get('importance') == 'عاجل':
+            msg = format_news(item, ai)
+            await update.message.reply_html(msg, reply_markup=news_keyboard(item['id']))
+            found = True
             await asyncio.sleep(0.5)
-        except Exception as e:
-            logger.error(f"Error sending news: {e}")
-            continue
+    if not found:
+        await update.message.reply_html("📭 <b>لا توجد أخبار عاجلة حالياً</b>", reply_markup=main_keyboard())
 
-async def breaking_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_data = db.get_user(update.effective_user.id)
-    lang = user_data.get("lang", "ar") if user_data else "ar"
-    
-    wait_msg = await update.message.reply_text(
-        "🚨 جاري جلب الأخبار العاجلة..." if lang == "ar" else "🚨 Fetching breaking news..."
+
+async def cmd_iran(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🇮🇷 جاري جلب أخبار إيران...")
+    await send_filtered(update.message.reply_html, ["إيران", "iran", "طهران", "خامنئي", "irgc", "حرس الثوري"], "🇮🇷 إيران")
+
+
+async def cmd_usa(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🇺🇸 جاري جلب أخبار أمريكا...")
+    await send_filtered(update.message.reply_html, ["أمريكا", "america", "usa", "واشنطن", "ترامب", "بايدن", "pentagon"], "🇺🇸 أمريكا")
+
+
+async def cmd_israel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🇮🇱 جاري جلب أخبار إسرائيل...")
+    await send_filtered(update.message.reply_html, ["إسرائيل", "israel", "تل أبيب", "نتنياهو", "netanyahu", "غزة"], "🇮🇱 إسرائيل")
+
+
+async def cmd_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    breaking_subscribers.add(update.effective_chat.id)
+    await update.message.reply_html(
+        "🔔 <b>تم تفعيل التنبيهات العاجلة!</b>\n\n✅ ستصلك الأخبار العاجلة فوراً\n\n/unsubscribe للإيقاف",
+        reply_markup=main_keyboard()
     )
-    
-    all_news = await fetcher.fetch_all_news()
-    breaking = [n for n in all_news if n.get("is_breaking")]
-    
-    if not breaking:
-        news_items = list(db.news.values())
-        breaking = [n for n in news_items if n.get("is_breaking")]
-    
-    await wait_msg.delete()
-    
-    if not breaking:
-        msg = "⚡ لا توجد أخبار عاجلة مؤكدة في الوقت الحالي.\n\nاستخدم /news لأحدث الأخبار" \
-              if lang == "ar" else \
-              "⚡ No confirmed breaking news at the moment.\n\nUse /news for latest news"
-        await update.message.reply_text(msg)
-        return
-    
-    header = "🚨 *الأخبار العاجلة المؤكدة* 🚨\n━━━━━━━━━━━━━━━━━━\n" \
-             if lang == "ar" else \
-             "🚨 *CONFIRMED BREAKING NEWS* 🚨\n━━━━━━━━━━━━━━━━━━\n"
-    
-    await update.message.reply_text(header, parse_mode=ParseMode.MARKDOWN)
-    
-    for news in breaking[:3]:
-        try:
-            msg = formatter.format_news_ar(news) if lang == "ar" else formatter.format_news_en(news)
-            await update.message.reply_text(
-                msg, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=False
-            )
-            await asyncio.sleep(0.5)
-        except Exception as e:
-            logger.error(f"Breaking news error: {e}")
 
-async def filtered_news(update: Update, context: ContextTypes.DEFAULT_TYPE, filter_key: str):
-    user_data = db.get_user(update.effective_user.id)
-    lang = user_data.get("lang", "ar") if user_data else "ar"
-    
-    wait_msg = await update.message.reply_text("⏳ جاري البحث..." if lang == "ar" else "⏳ Searching...")
-    
-    all_news = await fetcher.fetch_all_news()
-    if not all_news:
-        all_news = list(db.news.values())
-    
-    filters_map = {
-        "iran": ["إيران", "iran", "طهران", "tehran", "خامنئي", "الحرس الثوري", "irgc"],
-        "israel": ["إسرائيل", "israel", "نتنياهو", "netanyahu", "تل أبيب", "tel aviv", "جيش الاحتلال", "idf"],
-        "usa": ["أمريكا", "america", "بايدن", "biden", "ترامب", "trump", "واشنطن", "washington", "البيت الأبيض"],
-        "confirmed": [],
-        "unverified": []
-    }
-    
-    if filter_key in ["confirmed", "unverified"]:
-        if filter_key == "confirmed":
-            filtered = [n for n in all_news if n.get("verification", {}).get("level") == "confirmed"]
-        else:
-            filtered = [n for n in all_news if n.get("verification", {}).get("level") in ["unverified", "rumor"]]
+
+async def cmd_unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    breaking_subscribers.discard(update.effective_chat.id)
+    await update.message.reply_html("🔕 <b>تم إيقاف التنبيهات</b>\n\n/subscribe للتفعيل", reply_markup=main_keyboard())
+
+
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = f"""📊 <b>إحصائيات البوت</b>
+{'━' * 28}
+📰 أخبار محفوظة: <b>{len(news_cache)}</b>
+👥 المشتركون: <b>{len(breaking_subscribers)}</b>
+📡 المصادر النشطة: <b>{len(NEWS_SOURCES)}</b>
+🕐 آخر تحديث: <b>{last_fetch_time.strftime('%H:%M - %d/%m/%Y') if last_fetch_time else 'لم يتم بعد'}</b>
+{'━' * 28}
+⚡ <i>تطوير: عباس الشافعي</i>"""
+    await update.message.reply_html(msg, reply_markup=main_keyboard())
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = """📖 <b>الأوامر المتاحة</b>
+{'━' * 28}
+/start - القائمة الرئيسية
+/news - آخر الأخبار
+/breaking - الأخبار العاجلة
+/iran - أخبار إيران 🇮🇷
+/usa - أخبار أمريكا 🇺🇸
+/israel - أخبار إسرائيل 🇮🇱
+/subscribe - تفعيل التنبيهات 🔔
+/unsubscribe - إيقاف التنبيهات 🔕
+/stats - الإحصائيات 📊
+/help - المساعدة ❓
+{'━' * 28}
+⚡ <i>تطوير: عباس الشافعي</i>"""
+    await update.message.reply_html(msg, reply_markup=main_keyboard())
+
+
+# ═══════════════════════════════════════════════════════
+#              🔧 دوال مساعدة
+# ═══════════════════════════════════════════════════════
+async def send_news_list(reply_fn, keywords: list):
+    news = fetch_all_news()
+    if keywords:
+        filtered = [n for n in news if any(k.lower() in (n['title']+n['description']).lower() for k in keywords)]
     else:
-        keywords = filters_map.get(filter_key, [])
-        filtered = []
-        for news in all_news:
-            text = (news.get("title", "") + " " + news.get("summary", "")).lower()
-            if any(kw.lower() in text for kw in keywords):
-                filtered.append(news)
-    
-    await wait_msg.delete()
-    
+        filtered = news
+
     if not filtered:
-        no_result = {
-            "ar": "لم يتم العثور على أخبار لهذا الفلتر حالياً.",
-            "en": "No news found for this filter currently."
-        }
-        await update.message.reply_text(no_result[lang])
+        await reply_fn("📭 <b>لا توجد أخبار متاحة حالياً</b>", reply_markup=main_keyboard())
         return
-    
-    for news in filtered[:5]:
-        try:
-            msg = formatter.format_news_ar(news) if lang == "ar" else formatter.format_news_en(news)
-            await update.message.reply_text(
-                msg, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=False
-            )
-            await asyncio.sleep(0.5)
-        except Exception as e:
-            logger.error(f"Filter news error: {e}")
 
-async def iran_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await filtered_news(update, context, "iran")
+    for item in filtered[:4]:
+        ai = analyze_with_ai(item['title'], item['description'], item['source'])
+        msg = format_news(item, ai)
+        await reply_fn(msg, reply_markup=news_keyboard(item['id']))
+        await asyncio.sleep(0.4)
 
-async def israel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await filtered_news(update, context, "israel")
 
-async def usa_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await filtered_news(update, context, "usa")
+async def send_filtered(reply_fn, keywords: list, country: str):
+    news = fetch_all_news()
+    filtered = [n for n in news if any(k.lower() in (n['title']+n['description']).lower() for k in keywords)]
 
-async def confirmed_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await filtered_news(update, context, "confirmed")
-
-async def alert_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    user_data = db.get_user(uid)
-    lang = user_data.get("lang", "ar") if user_data else "ar"
-    
-    current = user_data.get("alerts", True) if user_data else True
-    new_state = not current
-    db.update_user(uid, "alerts", new_state)
-    
-    if lang == "ar":
-        msg = f"✅ تم تفعيل التنبيهات العاجلة!" if new_state else "🔕 تم إيقاف التنبيهات!"
-    else:
-        msg = "✅ Breaking news alerts enabled!" if new_state else "🔕 Alerts disabled!"
-    
-    await update.message.reply_text(msg)
-
-async def lang_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    buttons = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🇸🇦 العربية", callback_data="set_lang_ar"),
-            InlineKeyboardButton("🇺🇸 English", callback_data="set_lang_en"),
-        ]
-    ])
-    await update.message.reply_text(
-        "🌐 اختر اللغة / Choose Language:",
-        reply_markup=buttons
-    )
-
-async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_data = db.get_user(update.effective_user.id)
-    lang = user_data.get("lang", "ar") if user_data else "ar"
-    
-    if not context.args:
-        if lang == "ar":
-            await update.message.reply_text(
-                "🔍 *تحقق من الأخبار*\n\nأرسل: `/check [نص الخبر]`\nمثال: `/check صواريخ إيرانية تستهدف قاعدة أمريكية`",
-                parse_mode=ParseMode.MARKDOWN
-            )
-        else:
-            await update.message.reply_text(
-                "🔍 *Fact Check*\n\nSend: `/check [news text]`\nExample: `/check Iranian missiles target US base`",
-                parse_mode=ParseMode.MARKDOWN
-            )
+    if not filtered:
+        await reply_fn(f"📭 <b>لا توجد أخبار عن {country} حالياً</b>", reply_markup=main_keyboard())
         return
-    
-    news_text = " ".join(context.args)
-    
-    # تحليل النص
-    score = 50  # درجة افتراضية
-    
-    # البحث في المصادر المحلية
-    matches = []
-    for news_id, news in db.news.items():
-        if any(word.lower() in news.get("title", "").lower() 
-               for word in news_text.split() if len(word) > 3):
-            matches.append(news)
-    
-    if matches:
-        avg_trust = sum(m["trust"] for m in matches) / len(matches)
-        score = int(avg_trust)
-        sources_found = list(set(m["source"] for m in matches))
-        
-        if lang == "ar":
-            result = f"""
-🔍 *نتائج التحقق من الخبر*
-━━━━━━━━━━━━━━━━━━━━━━
-📝 *الخبر المُدخل:* {news_text}
 
-✅ *وُجد في {len(matches)} مصدر موثوق!*
-📡 *المصادر:* {', '.join(sources_found[:3])}
-📊 *درجة الموثوقية:* {verifier.get_trust_bar(score)}
+    for item in filtered[:4]:
+        ai = analyze_with_ai(item['title'], item['description'], item['source'])
+        msg = format_news(item, ai)
+        await reply_fn(msg, reply_markup=news_keyboard(item['id']))
+        await asyncio.sleep(0.4)
 
-{verifier.verify_news('check', score, news_text)['labels']['color']} *الحكم النهائي:* {verifier.verify_news('check', score, news_text)['labels']['ar']}
-"""
-        else:
-            result = f"""
-🔍 *Fact Check Results*
-━━━━━━━━━━━━━━━━━━━━━━
-📝 *Checked:* {news_text}
 
-✅ *Found in {len(matches)} trusted source(s)!*
-📡 *Sources:* {', '.join(sources_found[:3])}
-📊 *Trust Score:* {verifier.get_trust_bar(score)}
-
-{verifier.verify_news('check', score, news_text)['labels']['color']} *Verdict:* {verifier.verify_news('check', score, news_text)['labels']['en']}
-"""
-    else:
-        if lang == "ar":
-            result = f"""
-🔍 *نتائج التحقق*
-━━━━━━━━━━━━━━━━━━━━━━
-📝 *الخبر:* {news_text}
-
-⚠️ *لم يُعثر على هذا الخبر في مصادرنا الموثوقة حتى الآن.*
-📊 *درجة الموثوقية:* {verifier.get_trust_bar(35)}
-
-❌ *الحكم:* يُرجح أنه شائعة أو خبر غير مؤكد
-💡 *نصيحة:* انتظر للتأكيد من مصادر موثوقة
-"""
-        else:
-            result = f"""
-🔍 *Fact Check Result*
-━━━━━━━━━━━━━━━━━━━━━━
-📝 *News:* {news_text}
-
-⚠️ *Not found in our trusted sources yet.*
-📊 *Trust Score:* {verifier.get_trust_bar(35)}
-
-❌ *Verdict:* Likely rumor or unconfirmed
-💡 *Tip:* Wait for confirmation from trusted sources
-"""
-    
-    await update.message.reply_text(result.strip(), parse_mode=ParseMode.MARKDOWN)
-
-async def sources_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_data = db.get_user(update.effective_user.id)
-    lang = user_data.get("lang", "ar") if user_data else "ar"
-    
-    if lang == "ar":
-        text = "📡 *المصادر الموثوقة المتابعة*\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        text += "🌍 *المصادر العربية:*\n"
-        for name, data in NEWS_SOURCES["arabic"].items():
-            text += f"{data['icon']} *{name}* - موثوقية: {data['trust']}%\n"
-        text += "\n🌐 *المصادر الدولية:*\n"
-        for name, data in NEWS_SOURCES["international"].items():
-            text += f"{data['icon']} *{name}* - Trust: {data['trust']}%\n"
-    else:
-        text = "📡 *Trusted News Sources*\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        text += "🌍 *Arabic Sources:*\n"
-        for name, data in NEWS_SOURCES["arabic"].items():
-            text += f"{data['icon']} *{name}* - Trust: {data['trust']}%\n"
-        text += "\n🌐 *International Sources:*\n"
-        for name, data in NEWS_SOURCES["international"].items():
-            text += f"{data['icon']} *{name}* - Trust: {data['trust']}%\n"
-    
-    await update.message.reply_text(text.strip(), parse_mode=ParseMode.MARKDOWN)
-
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_data = db.get_user(update.effective_user.id)
-    lang = user_data.get("lang", "ar") if user_data else "ar"
-    stats = db.get_stats()
-    
-    if lang == "ar":
-        text = f"""
-📊 *إحصائيات البوت*
-━━━━━━━━━━━━━━━━━━━━━━
-👥 *المستخدمون:* {stats['total']}
-🔔 *المفعّل تنبيهاتهم:* {stats['active']}
-🇸🇦 *مستخدمو العربية:* {stats['arabic']}
-🇺🇸 *مستخدمو الإنجليزية:* {stats['english']}
-📰 *الأخبار المحفوظة:* {stats['news_count']}
-📡 *المصادر الموثوقة:* {len(NEWS_SOURCES['arabic']) + len(NEWS_SOURCES['international'])}
-
-🛠 *المطور:* {DEVELOPER} | {DEVELOPER_TG}
-📌 *الإصدار:* v{BOT_VERSION}
-"""
-    else:
-        text = f"""
-📊 *Bot Statistics*
-━━━━━━━━━━━━━━━━━━━━━━
-👥 *Total Users:* {stats['total']}
-🔔 *Alerts Active:* {stats['active']}
-🇸🇦 *Arabic Users:* {stats['arabic']}
-🇺🇸 *English Users:* {stats['english']}
-📰 *Saved News:* {stats['news_count']}
-📡 *Trusted Sources:* {len(NEWS_SOURCES['arabic']) + len(NEWS_SOURCES['international'])}
-
-🛠 *Developer:* {DEVELOPER} | {DEVELOPER_TG}
-📌 *Version:* v{BOT_VERSION}
-"""
-    await update.message.reply_text(text.strip(), parse_mode=ParseMode.MARKDOWN)
-
-async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_data = db.get_user(update.effective_user.id)
-    lang = user_data.get("lang", "ar") if user_data else "ar"
-    
-    if lang == "ar":
-        text = f"""
-ℹ️ *عن بوت أخبار الحرب*
-━━━━━━━━━━━━━━━━━━━━━━━━
-🤖 *اسم البوت:* War News Bot
-📌 *الإصدار:* v{BOT_VERSION}
-🛠 *المطور:* {DEVELOPER}
-📱 *تيليغرام:* {DEVELOPER_TG}
-
-🔥 *المميزات الرئيسية:*
-• تغطية شاملة للحرب الأمريكية-الإيرانية-الإسرائيلية
-• {len(NEWS_SOURCES['arabic']) + len(NEWS_SOURCES['international'])} مصدر موثوق عالمي وعربي
-• نظام تحقق ذكي بأربعة مستويات
-• تنبيهات عاجلة فورية
-• دعم كامل للغتين العربية والإنجليزية
-• تحليل ودرجة موثوقية لكل خبر
-• تصفية الأخبار حسب الدولة والموثوقية
-• أداة تحقق من الأخبار المشبوهة
-
-📜 *ملاحظة:* يعتمد البوت على مصادر إخبارية موثوقة
-ولا يمثل رأي المطور أي توجه سياسي.
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-جميع الحقوق محفوظة © {datetime.now().year}
-"""
-    else:
-        text = f"""
-ℹ️ *About War News Bot*
-━━━━━━━━━━━━━━━━━━━━━━━━
-🤖 *Bot Name:* War News Bot
-📌 *Version:* v{BOT_VERSION}
-🛠 *Developer:* {DEVELOPER}
-📱 *Telegram:* {DEVELOPER_TG}
-
-🔥 *Key Features:*
-• Comprehensive US-Iran-Israel war coverage
-• {len(NEWS_SOURCES['arabic']) + len(NEWS_SOURCES['international'])} trusted global & Arabic sources
-• Smart 4-level verification system
-• Instant breaking news alerts
-• Full Arabic & English support
-• Trust score analysis for every news item
-• Country & credibility filtering
-• Rumor fact-checking tool
-
-📜 *Note:* This bot relies on trusted news sources.
-Developer does not hold any political views.
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-All rights reserved © {datetime.now().year}
-"""
-    await update.message.reply_text(text.strip(), parse_mode=ParseMode.MARKDOWN)
-
-# ══════════════════════════════════════════════
-#              معالج الأزرار
-# ══════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
+#           🎯 معالج الأزرار التفاعلية
+# ═══════════════════════════════════════════════════════
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
-    uid = update.effective_user.id
-    user_data = db.get_user(uid)
-    lang = user_data.get("lang", "ar") if user_data else "ar"
     data = query.data
-    
-    if data == "latest_news":
-        await query.message.reply_text(
-            "⏳ جاري جلب الأخبار..." if lang == "ar" else "⏳ Fetching news..."
-        )
-        fake_update = type('obj', (object,), {'message': query.message, 'effective_user': update.effective_user})()
-        await news_command(fake_update, context)
-    
-    elif data == "breaking_news":
-        fake_update = type('obj', (object,), {'message': query.message, 'effective_user': update.effective_user})()
-        await breaking_command(fake_update, context)
-    
-    elif data == "iran_news":
-        fake_update = type('obj', (object,), {'message': query.message, 'effective_user': update.effective_user})()
-        await filtered_news(fake_update, context, "iran")
-    
-    elif data == "israel_news":
-        fake_update = type('obj', (object,), {'message': query.message, 'effective_user': update.effective_user})()
-        await filtered_news(fake_update, context, "israel")
-    
-    elif data == "usa_news":
-        fake_update = type('obj', (object,), {'message': query.message, 'effective_user': update.effective_user})()
-        await filtered_news(fake_update, context, "usa")
-    
-    elif data == "world_news":
-        fake_update = type('obj', (object,), {'message': query.message, 'effective_user': update.effective_user})()
-        await news_command(fake_update, context)
-    
-    elif data == "confirmed_news":
-        fake_update = type('obj', (object,), {'message': query.message, 'effective_user': update.effective_user})()
-        await filtered_news(fake_update, context, "confirmed")
-    
-    elif data == "unverified_news":
-        fake_update = type('obj', (object,), {'message': query.message, 'effective_user': update.effective_user})()
-        await filtered_news(fake_update, context, "unverified")
-    
-    elif data == "toggle_alerts":
-        current = user_data.get("alerts", True) if user_data else True
-        new_state = not current
-        db.update_user(uid, "alerts", new_state)
-        if lang == "ar":
-            msg = "✅ تم تفعيل التنبيهات!" if new_state else "🔕 تم إيقاف التنبيهات!"
-        else:
-            msg = "✅ Alerts enabled!" if new_state else "🔕 Alerts disabled!"
-        await query.answer(msg, show_alert=True)
-    
-    elif data == "change_lang":
-        buttons = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("🇸🇦 العربية", callback_data="set_lang_ar"),
-                InlineKeyboardButton("🇺🇸 English", callback_data="set_lang_en"),
-            ]
-        ])
-        await query.message.reply_text(
-            "🌐 اختر اللغة / Choose Language:",
-            reply_markup=buttons
-        )
-    
-    elif data == "set_lang_ar":
-        db.update_user(uid, "lang", "ar")
-        await query.answer("✅ تم تغيير اللغة إلى العربية!", show_alert=True)
-        await query.message.reply_text(
-            "✅ تم تغيير اللغة إلى العربية 🇸🇦",
-            reply_markup=formatter.get_main_menu_ar()
-        )
-    
-    elif data == "set_lang_en":
-        db.update_user(uid, "lang", "en")
-        await query.answer("✅ Language changed to English!", show_alert=True)
-        await query.message.reply_text(
-            "✅ Language changed to English 🇺🇸",
-            reply_markup=formatter.get_main_menu_en()
-        )
-    
-    elif data == "stats":
-        stats = db.get_stats()
-        if lang == "ar":
-            await query.message.reply_text(
-                f"📊 المستخدمون: {stats['total']} | الأخبار: {stats['news_count']}",
+    chat_id = query.message.chat.id
+
+    async def send(msg, kb=None):
+        try:
+            await context.bot.send_message(
+                chat_id, msg,
+                parse_mode=ParseMode.HTML,
+                reply_markup=kb or main_keyboard()
             )
-        else:
-            await query.message.reply_text(
-                f"📊 Users: {stats['total']} | News: {stats['news_count']}",
-            )
-    
-    elif data == "about":
-        fake_update = type('obj', (object,), {'message': query.message, 'effective_user': update.effective_user})()
-        await about_command(fake_update, context)
-    
-    elif data == "sources":
-        fake_update = type('obj', (object,), {'message': query.message, 'effective_user': update.effective_user})()
-        await sources_command(fake_update, context)
-    
-    elif data == "fact_check":
-        if lang == "ar":
-            await query.message.reply_text(
-                "🔍 أرسل: `/check [نص الخبر]`\nمثال: `/check صواريخ إيران تضرب قاعدة أمريكية`",
-                parse_mode=ParseMode.MARKDOWN
-            )
-        else:
-            await query.message.reply_text(
-                "🔍 Send: `/check [news text]`\nExample: `/check Iran missiles hit US base`",
-                parse_mode=ParseMode.MARKDOWN
-            )
-    
-    elif data.startswith("verify_"):
-        news_id = data.replace("verify_", "")
-        news = db.news.get(news_id)
+        except Exception as e:
+            logger.error(f"Send error: {e}")
+
+    if data == "home":
+        await query.edit_message_text(
+            "🏠 <b>القائمة الرئيسية</b>",
+            reply_markup=main_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+
+    elif data == "latest":
+        await query.edit_message_text("⏳ جاري جلب الأخبار...", parse_mode=ParseMode.HTML)
+        news = fetch_all_news()
         if news:
-            v = news["verification"]
-            if lang == "ar":
-                detail = f"""
-🔬 *تفاصيل التحقق التقني*
-━━━━━━━━━━━━━━━━━━━━━━
-📰 *العنوان:* {news['title'][:100]}
-📡 *المصدر:* {news['source']}
-📊 *درجة موثوقية المصدر:* {news['trust']}%
-🧮 *درجة التحقق:* {v['score']}/100
-{v['labels']['color']} *الحكم:* {v['labels']['ar']}
-📊 *الشريط:* {verifier.get_trust_bar(v['score'])}
-"""
-            else:
-                detail = f"""
-🔬 *Technical Verification Details*
-━━━━━━━━━━━━━━━━━━━━━━
-📰 *Title:* {news['title'][:100]}
-📡 *Source:* {news['source']}
-📊 *Source Trust:* {news['trust']}%
-🧮 *Verify Score:* {v['score']}/100
-{v['labels']['color']} *Verdict:* {v['labels']['en']}
-📊 *Bar:* {verifier.get_trust_bar(v['score'])}
-"""
-            await query.message.reply_text(detail.strip(), parse_mode=ParseMode.MARKDOWN)
+            for item in news[:3]:
+                ai = analyze_with_ai(item['title'], item['description'], item['source'])
+                await send(format_news(item, ai), news_keyboard(item['id']))
+                await asyncio.sleep(0.4)
+        else:
+            await send("📭 لا توجد أخبار حالياً")
 
-# ══════════════════════════════════════════════
-#              المهمة الدورية
-# ══════════════════════════════════════════════
-async def auto_news_job(context: ContextTypes.DEFAULT_TYPE):
-    """جلب وإرسال الأخبار الجديدة تلقائياً كل 15 دقيقة"""
-    logger.info("🔄 Auto news fetch job running...")
-    
-    new_news = await fetcher.fetch_all_news()
-    breaking_news = [n for n in new_news if n.get("is_breaking")]
-    
-    if breaking_news:
-        users = db.get_all_users()
-        for uid, user_data in users.items():
-            if not user_data.get("alerts", True):
-                continue
-            
-            lang = user_data.get("lang", "ar")
-            
-            for news in breaking_news[:2]:
-                try:
-                    if lang == "ar":
-                        msg = f"🚨 *خبر عاجل مؤكد الآن!*\n━━━━━━━━━━━━━━\n\n{formatter.format_news_ar(news)}"
-                    else:
-                        msg = f"🚨 *BREAKING NEWS - CONFIRMED NOW!*\n━━━━━━━━━━━━━━\n\n{formatter.format_news_en(news)}"
-                    
-                    await context.bot.send_message(
-                        chat_id=int(uid),
-                        text=msg,
-                        parse_mode=ParseMode.MARKDOWN,
-                        disable_web_page_preview=False
-                    )
-                    await asyncio.sleep(0.1)
-                except Exception as e:
-                    logger.error(f"Error sending to user {uid}: {e}")
+    elif data == "breaking":
+        await query.edit_message_text("🔍 جاري البحث...", parse_mode=ParseMode.HTML)
+        news = fetch_all_news()
+        found = False
+        for item in news[:15]:
+            ai = analyze_with_ai(item['title'], item['description'], item['source'])
+            if ai.get('importance') in ['عاجل', 'مهم']:
+                await send(format_news(item, ai), news_keyboard(item['id']))
+                found = True
+                await asyncio.sleep(0.4)
+                break
+        if not found:
+            await send("📭 <b>لا توجد أخبار عاجلة حالياً</b>")
 
-# ══════════════════════════════════════════════
-#              تشغيل البوت
-# ══════════════════════════════════════════════
-async def set_commands(app: Application):
-    commands = [
-        BotCommand("start", "القائمة الرئيسية"),
-        BotCommand("news", "أحدث الأخبار"),
-        BotCommand("breaking", "الأخبار العاجلة المؤكدة"),
-        BotCommand("iran", "أخبار إيران"),
-        BotCommand("israel", "أخبار إسرائيل"),
-        BotCommand("usa", "أخبار أمريكا"),
-        BotCommand("confirmed", "الأخبار المؤكدة فقط"),
-        BotCommand("check", "تحقق من خبر"),
-        BotCommand("sources", "المصادر الموثوقة"),
-        BotCommand("alert", "تفعيل/إيقاف التنبيهات"),
-        BotCommand("lang", "تغيير اللغة"),
-        BotCommand("stats", "إحصائيات البوت"),
-        BotCommand("about", "عن البوت"),
-        BotCommand("help", "المساعدة"),
-    ]
-    await app.bot.set_my_commands(commands)
+    elif data == "iran":
+        await query.edit_message_text("🇮🇷 جاري جلب أخبار إيران...", parse_mode=ParseMode.HTML)
+        await send_filtered(send, ["إيران", "iran", "طهران", "خامنئي", "irgc"], "🇮🇷 إيران")
 
-def main():
-    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
-        logger.error("❌ الرجاء تعيين BOT_TOKEN في متغيرات البيئة أو في الكود")
+    elif data == "usa":
+        await query.edit_message_text("🇺🇸 جاري جلب أخبار أمريكا...", parse_mode=ParseMode.HTML)
+        await send_filtered(send, ["أمريكا", "america", "usa", "واشنطن", "ترامب"], "🇺🇸 أمريكا")
+
+    elif data == "israel":
+        await query.edit_message_text("🇮🇱 جاري جلب أخبار إسرائيل...", parse_mode=ParseMode.HTML)
+        await send_filtered(send, ["إسرائيل", "israel", "تل أبيب", "نتنياهو", "غزة"], "🇮🇱 إسرائيل")
+
+    elif data == "military":
+        await query.edit_message_text("💥 جاري جلب أخبار العمليات...", parse_mode=ParseMode.HTML)
+        await send_filtered(send, ["هجوم", "ضربة", "صاروخ", "مسيّرة", "strike", "missile", "drone", "attack"], "💥 العمليات العسكرية")
+
+    elif data == "nuclear":
+        await query.edit_message_text("☢️ جاري جلب الأخبار النووية...", parse_mode=ParseMode.HTML)
+        await send_filtered(send, ["نووي", "nuclear", "تخصيب", "uranium", "يورانيوم", "برنامج نووي"], "☢️ الملف النووي")
+
+    elif data == "verified":
+        await query.edit_message_text("✅ جاري البحث عن الأخبار المؤكدة...", parse_mode=ParseMode.HTML)
+        news = fetch_all_news()
+        found = False
+        for item in news[:15]:
+            ai = analyze_with_ai(item['title'], item['description'], item['source'])
+            if ai.get('verified') == 'مؤكد':
+                await send(format_news(item, ai), news_keyboard(item['id']))
+                found = True
+                await asyncio.sleep(0.4)
+        if not found:
+            await send("📭 لا توجد أخبار مؤكدة حالياً")
+
+    elif data == "unverified":
+        await query.edit_message_text("❓ جاري البحث عن الأخبار غير المؤكدة...", parse_mode=ParseMode.HTML)
+        news = fetch_all_news()
+        found = False
+        for item in news[:15]:
+            ai = analyze_with_ai(item['title'], item['description'], item['source'])
+            if ai.get('verified') == 'غير مؤكد':
+                await send(format_news(item, ai), news_keyboard(item['id']))
+                found = True
+                await asyncio.sleep(0.4)
+        if not found:
+            await send("📭 لا توجد أخبار غير مؤكدة في قاعدة البيانات")
+
+    elif data == "sub":
+        breaking_subscribers.add(chat_id)
+        await query.edit_message_text(
+            "🔔 <b>تم تفعيل التنبيهات!</b>\n\n✅ ستصلك الأخبار العاجلة فوراً",
+            reply_markup=main_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+
+    elif data == "unsub":
+        breaking_subscribers.discard(chat_id)
+        await query.edit_message_text(
+            "🔕 <b>تم إيقاف التنبيهات</b>",
+            reply_markup=main_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+
+    elif data == "sources":
+        sources_text = "📡 <b>مصادر الأخبار الموثوقة</b>\n" + "━" * 28 + "\n\n"
+        for name, info in NEWS_SOURCES.items():
+            sources_text += f"{info['flag']} <b>{name}</b>\n"
+            sources_text += f"   📊 مستوى الثقة: {info['trust']}%\n"
+            sources_text += f"   🌐 اللغة: {'العربية' if info['lang'] == 'ar' else 'الإنجليزية'}\n\n"
+        sources_text += "━" * 28 + "\n⚡ <i>تطوير: عباس الشافعي</i>"
+        await query.edit_message_text(sources_text, reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
+
+    elif data == "stats":
+        stats = f"""📊 <b>إحصائيات البوت</b>
+{'━' * 28}
+📰 أخبار محفوظة: <b>{len(news_cache)}</b>
+👥 المشتركون: <b>{len(breaking_subscribers)}</b>
+📡 المصادر: <b>{len(NEWS_SOURCES)}</b>
+🕐 آخر تحديث: <b>{last_fetch_time.strftime('%H:%M') if last_fetch_time else 'لم يتم'}</b>
+{'━' * 28}
+⚡ <i>تطوير: عباس الشافعي</i>"""
+        await query.edit_message_text(stats, reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
+
+    elif data == "about":
+        about = """🤖 <b>عن بوت أخبار الحرب</b>
+{'═' * 30}
+
+🎯 <b>الهدف:</b>
+تغطية إخبارية ذكية لأخبار الحرب بين أمريكا وإسرائيل وإيران
+
+📡 <b>المصادر:</b>
+8 مصادر عالمية وعربية موثوقة
+
+🤖 <b>الذكاء الاصطناعي:</b>
+• التحقق من صحة الأخبار
+• تحليل مستوى التهديد
+• تلخيص الأخبار بالعربية
+• تنبيهات الأخبار العاجلة
+
+{'━' * 30}
+👨‍💻 <b>تطوير:</b> عباس الشافعي
+🤖 <b>AI:</b> Claude (Anthropic)
+📅 <b>الإصدار:</b> 2.0 Pro
+{'═' * 30}"""
+        await query.edit_message_text(about, reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
+
+    elif data == "help_menu":
+        help_text = """❓ <b>المساعدة</b>
+{'━' * 28}
+الأوامر المتاحة:
+/start - القائمة الرئيسية
+/news - آخر الأخبار
+/breaking - الأخبار العاجلة
+/iran | /usa | /israel - أخبار حسب الدولة
+/subscribe - تفعيل التنبيهات
+/unsubscribe - إيقاف التنبيهات
+/stats - الإحصائيات
+
+مستويات التحقق:
+✅ مؤكد | ❌ غير مؤكد | 🔄 قيد التحقق
+
+مستويات الأهمية:
+🚨 عاجل | ⚠️ مهم | 📌 متوسط | 📋 عادي
+{'━' * 28}
+⚡ <i>تطوير: عباس الشافعي</i>"""
+        await query.edit_message_text(help_text, reply_markup=main_keyboard(), parse_mode=ParseMode.HTML)
+
+    elif data.startswith("ai_"):
+        news_id = int(data[3:])
+        if news_id in news_cache:
+            item = news_cache[news_id]
+            ai = analyze_with_ai(item['title'], item['description'], item['source'])
+            analysis = f"""🤖 <b>تحليل الذكاء الاصطناعي</b>
+{'═' * 30}
+
+📰 <b>{html.escape(item['title'][:100])}</b>
+
+{'━' * 28}
+🔍 <b>التحقق:</b> {ai.get('verified', 'غير محدد')}
+⚠️ <b>الأهمية:</b> {ai.get('importance', 'متوسط')}
+💢 <b>التهديد:</b> {ai.get('threat_level', 'متوسط')}
+{ai.get('alert_level', '🟡')} <b>مستوى التنبيه</b>
+
+📝 <b>الملخص:</b>
+<i>{html.escape(str(ai.get('summary_ar', ''))[:300])}</i>
+
+🌍 <b>الدول:</b> {html.escape(', '.join(ai.get('countries', [])))}
+🏷️ <b>الوسوم:</b> {' '.join(['#' + t for t in ai.get('tags', [])])}
+{'═' * 30}
+⚡ <i>Claude AI Analysis | عباس الشافعي</i>"""
+
+            await send(analysis)
+
+
+# ═══════════════════════════════════════════════════════
+#           ⏰ مهمة دورية للتنبيهات العاجلة
+# ═══════════════════════════════════════════════════════
+async def auto_alerts(context: ContextTypes.DEFAULT_TYPE):
+    """فحص الأخبار العاجلة كل 15 دقيقة وإرسال تنبيهات"""
+    if not breaking_subscribers:
         return
-    
+
+    try:
+        news = fetch_all_news()
+        for item in news:
+            if item['id'] in sent_news_ids:
+                continue
+            ai = analyze_with_ai(item['title'], item['description'], item['source'])
+            if ai.get('importance') == 'عاجل':
+                sent_news_ids.add(item['id'])
+                msg = "🚨🚨 <b>تنبيه عاجل!</b> 🚨🚨\n\n" + format_news(item, ai)
+
+                for chat_id in list(breaking_subscribers):
+                    try:
+                        await context.bot.send_message(
+                            chat_id, msg,
+                            parse_mode=ParseMode.HTML,
+                            reply_markup=main_keyboard()
+                        )
+                        await asyncio.sleep(0.1)
+                    except Exception:
+                        breaking_subscribers.discard(chat_id)
+    except Exception as e:
+        logger.error(f"Auto alerts error: {e}")
+
+
+# ═══════════════════════════════════════════════════════
+#                   🚀 تشغيل البوت
+# ═══════════════════════════════════════════════════════
+def main():
+    print("""
+╔══════════════════════════════════════════════════╗
+║  🔴  بوت أخبار الحرب - يبدأ التشغيل  🔴       ║
+║       👨‍💻 تطوير: عباس الشافعي                   ║
+║       🤖 بدعم: Claude AI (Anthropic)             ║
+╚══════════════════════════════════════════════════╝
+    """)
+
     app = Application.builder().token(BOT_TOKEN).build()
-    
+
     # تسجيل الأوامر
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("news", news_command))
-    app.add_handler(CommandHandler("breaking", breaking_command))
-    app.add_handler(CommandHandler("iran", iran_command))
-    app.add_handler(CommandHandler("israel", israel_command))
-    app.add_handler(CommandHandler("usa", usa_command))
-    app.add_handler(CommandHandler("confirmed", confirmed_command))
-    app.add_handler(CommandHandler("alert", alert_command))
-    app.add_handler(CommandHandler("lang", lang_command))
-    app.add_handler(CommandHandler("check", check_command))
-    app.add_handler(CommandHandler("sources", sources_command))
-    app.add_handler(CommandHandler("stats", stats_command))
-    app.add_handler(CommandHandler("about", about_command))
-    
+    app.add_handler(CommandHandler("news", cmd_news))
+    app.add_handler(CommandHandler("breaking", cmd_breaking))
+    app.add_handler(CommandHandler("iran", cmd_iran))
+    app.add_handler(CommandHandler("usa", cmd_usa))
+    app.add_handler(CommandHandler("israel", cmd_israel))
+    app.add_handler(CommandHandler("subscribe", cmd_subscribe))
+    app.add_handler(CommandHandler("unsubscribe", cmd_unsubscribe))
+    app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("help", cmd_help))
+
     # معالج الأزرار
     app.add_handler(CallbackQueryHandler(button_handler))
-    
-    # المهمة الدورية - كل 15 دقيقة
-    app.job_queue.run_repeating(auto_news_job, interval=900, first=30)
-    
-    # إعداد الأوامر عند بدء التشغيل
-    app.post_init = set_commands
-    
-    logger.info(f"""
-╔══════════════════════════════════════╗
-║      🔥 WAR NEWS BOT STARTED 🔥      ║
-║  Developer: {DEVELOPER}           ║
-║  Telegram: {DEVELOPER_TG}              ║
-║  Version: v{BOT_VERSION}                   ║
-╚══════════════════════════════════════╝
-""")
-    
+
+    # مهمة تلقائية كل 15 دقيقة
+    app.job_queue.run_repeating(auto_alerts, interval=900, first=120)
+
+    print("✅ البوت يعمل الآن! اضغط Ctrl+C للإيقاف\n")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
+
 
 if __name__ == "__main__":
     main()
